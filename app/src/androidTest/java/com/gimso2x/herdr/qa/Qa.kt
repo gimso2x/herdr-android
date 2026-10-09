@@ -241,6 +241,7 @@ object Qa {
 
     /** Two animation frames have been produced: the page is drawn and hit-testable. */
     fun awaitFrame() {
+        awaitJs("page painted", 20_000, "performance.getEntriesByType('paint').length > 0")
         js("(function(){window.__qaFrame=0;requestAnimationFrame(function(){requestAnimationFrame(function(){window.__qaFrame=1})});return 1})()")
         awaitJs("page produced a frame", 20_000, "window.__qaFrame === 1")
     }
@@ -260,7 +261,8 @@ object Qa {
         }
         val x = origin[0] + (rect.getDouble(0) * rect.getDouble(2)).toInt()
         val y = origin[1] + (rect.getDouble(1) * rect.getDouble(2)).toInt()
-        logFact("tap $selector at $x,$y origin=${origin[0]},${origin[1]} dpr=${rect.getDouble(2)}")
+        val hit = jsString("(function(){var e=document.elementFromPoint(${rect.getDouble(0)},${rect.getDouble(1)});return e?(e.tagName+'#'+e.id):'none'})()")
+        logFact("tap $selector at $x,$y origin=${origin[0]},${origin[1]} dpr=${rect.getDouble(2)} hit=$hit")
         check(device.click(x, y)) { "tap on $selector was not injected" }
     }
 

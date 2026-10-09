@@ -60,6 +60,9 @@ run_phase() {
   echo "=== phase $cls (api $API)"
   adb logcat -c
   timeout "$PHASE_TIMEOUT" adb shell am instrument -w -r -e class "$TEST_PKG.$cls" "$RUNNER" 2>&1 | tee "$out"
+  # Facts the tests log on purpose (tag QaFail), kept for passing phases too.
+  adb logcat -d -s QaFail 2>/dev/null | grep -v '^---' >"$OUT/$cls-facts.txt" || true
+  [ -s "$OUT/$cls-facts.txt" ] || rm -f "$OUT/$cls-facts.txt"
   if grep -q '^OK (' "$out" && ! grep -q 'FAILURES!!!' "$out"; then
     echo "=== phase $cls: OK"
   else

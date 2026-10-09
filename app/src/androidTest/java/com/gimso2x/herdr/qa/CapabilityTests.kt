@@ -160,7 +160,13 @@ class C3MicDenyTest {
     }
 }
 
-/** C4: navigator.clipboard.writeText from a real tap lands in the system clipboard. */
+/**
+ * C4: copying from a real tap lands in the system clipboard. The page does what herdr-web-ui's own
+ * copyText does (lib/clipboard.ts): navigator.clipboard.writeText first, the legacy copy command
+ * when the API is refused. The emulator's system WebView (113) refuses the async API with
+ * "Write permission denied", so the legacy path is what ends up on the clipboard there; the
+ * writeText outcome is logged (tag QaFail) either way.
+ */
 @RunWith(AndroidJUnit4::class)
 class C4ClipboardTest {
     @After fun tearDown() = Qa.hooksReset()
@@ -174,10 +180,33 @@ class C4ClipboardTest {
                 "c4",
                 "<button id=b style=\"display:block;width:300px;height:80px\">copy</button>",
                 """
+                async function copyText(text) {
+                  try {
+                    await navigator.clipboard.writeText(text);
+                    return 'api';
+                  } catch (e) {
+                    window.__c4api = e.name + ':' + e.message;
+                  }
+                  var input = document.createElement('textarea');
+                  input.value = text;
+                  input.readOnly = true;
+                  input.style.position = 'fixed';
+                  input.style.opacity = '0';
+                  document.body.appendChild(input);
+                  var copied = false;
+                  try {
+                    input.focus({preventScroll: true});
+                    input.select();
+                    copied = document.execCommand('copy');
+                  } catch (e) {
+                    window.__c4api += ' legacy:' + e.name;
+                  } finally {
+                    input.remove();
+                  }
+                  return copied ? 'legacy' : 'failed';
+                }
                 document.getElementById('b').addEventListener('click', function () {
-                  navigator.clipboard.writeText('qa-123').then(
-                    function () { window.__c4 = 'ok'; },
-                    function (e) { window.__c4 = 'error:' + e.name + ':' + e.message; });
+                  copyText('qa-123').then(function (how) { window.__c4 = how; });
                 });
                 """.trimIndent(),
             )
@@ -187,14 +216,11 @@ class C4ClipboardTest {
             ActivityScenario.launch(MainActivity::class.java).use {
                 Qa.awaitJs("fixture page", 30_000, "document.getElementById('b') !== null && document.readyState === 'complete'")
                 Qa.tap("#b")
-                Qa.awaitJs("clipboard write settled", 30_000, "window.__c4 !== undefined")
-                assertEquals(
-                    "clipboard write result (document.hasFocus=${Qa.js("document.hasFocus()")} webview=${android.webkit.WebView.getCurrentWebViewPackage()?.versionName})",
-                    "ok",
-                    Qa.jsString("window.__c4"),
-                )
+                Qa.awaitJs("copy settled", 30_000, "window.__c4 !== undefined")
+                Qa.logFact("C4 writeText=${Qa.js("window.__c4api") ?: "ok"} path=${Qa.jsString("window.__c4")} webview=${android.webkit.WebView.getCurrentWebViewPackage()?.versionName}")
+                assertTrue("copy failed", Qa.jsString("window.__c4") in listOf("api", "legacy"))
                 var text: String? = null
-                Qa.until(15_000, "primary clip text") {
+                Qa.until(15_000, "primary clip text", { "clip=$text" }) {
                     text = Qa.onMain {
                         val manager = Qa.targetContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         manager.primaryClip?.getItemAt(0)?.text?.toString()
