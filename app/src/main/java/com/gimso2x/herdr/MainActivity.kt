@@ -267,6 +267,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) webView.requestFocus()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         if (started.value) {
@@ -324,6 +329,9 @@ class MainActivity : ComponentActivity() {
 
             override fun onPageFinished(view: WebView, url: String?) {
                 keepSplash = false
+                // The Compose host holds the initial focus; without view focus the page reports
+                // document.hasFocus() == false (clipboard writes are refused, the keyboard may not show).
+                view.requestFocus()
             }
         }
         view.webChromeClient = chromeClient
