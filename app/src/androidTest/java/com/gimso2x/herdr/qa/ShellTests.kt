@@ -173,6 +173,7 @@ class F4BackOrderTest {
                 Qa.awaitJs("page /b", 30_000, "location.pathname === '/b' && document.getElementById('i') !== null && document.readyState === 'complete'")
 
                 Qa.tap("#i")
+                Qa.until(20_000, "input focused by the tap") { Qa.jsString("document.activeElement && document.activeElement.id") == "i" }
                 Qa.until(20_000, "keyboard shown") { Qa.isImeVisible() }
 
                 Qa.device.pressBack()

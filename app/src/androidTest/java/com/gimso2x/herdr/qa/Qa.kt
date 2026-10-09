@@ -239,8 +239,15 @@ object Qa {
 
     fun jsString(expr: String): String? = js(expr) as? String
 
+    /** Two animation frames have been produced: the page is drawn and hit-testable. */
+    fun awaitFrame() {
+        js("(function(){window.__qaFrame=0;requestAnimationFrame(function(){requestAnimationFrame(function(){window.__qaFrame=1})});return 1})()")
+        awaitJs("page produced a frame", 20_000, "window.__qaFrame === 1")
+    }
+
     /** A real finger tap on the first element matching [selector] (a genuine user gesture). */
     fun tap(selector: String) {
+        awaitFrame()
         val quoted = JSONObject.quote(selector)
         val rect = js(
             "(function(){var e=document.querySelector($quoted);var b=e.getBoundingClientRect();" +

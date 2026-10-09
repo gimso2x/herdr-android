@@ -177,7 +177,7 @@ class C4ClipboardTest {
                 document.getElementById('b').addEventListener('click', function () {
                   navigator.clipboard.writeText('qa-123').then(
                     function () { window.__c4 = 'ok'; },
-                    function (e) { window.__c4 = 'error:' + e.name; });
+                    function (e) { window.__c4 = 'error:' + e.name + ':' + e.message; });
                 });
                 """.trimIndent(),
             )
@@ -188,7 +188,11 @@ class C4ClipboardTest {
                 Qa.awaitJs("fixture page", 30_000, "document.getElementById('b') !== null && document.readyState === 'complete'")
                 Qa.tap("#b")
                 Qa.awaitJs("clipboard write settled", 30_000, "window.__c4 !== undefined")
-                assertEquals("clipboard write result (document.hasFocus=${Qa.js("document.hasFocus()")})", "ok", Qa.jsString("window.__c4"))
+                assertEquals(
+                    "clipboard write result (document.hasFocus=${Qa.js("document.hasFocus()")} webview=${android.webkit.WebView.getCurrentWebViewPackage()?.versionName})",
+                    "ok",
+                    Qa.jsString("window.__c4"),
+                )
                 var text: String? = null
                 Qa.until(15_000, "primary clip text") {
                     text = Qa.onMain {

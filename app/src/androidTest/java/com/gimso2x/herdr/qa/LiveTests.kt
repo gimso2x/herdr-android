@@ -29,12 +29,17 @@ private fun liveGuardOn() {
     LiveQaGuard.enable(Qa.LIVE)
 }
 
-private fun awaitLivePage(timeoutMs: Long, extra: String = "true") {
-    Qa.awaitJs(
-        "live herdr page",
-        timeoutMs,
-        "document.title === ${JSONObject.quote(TITLE)} && location.host === 'herdr.example.com' && ($extra)",
-    )
+/**
+ * herdr-web-ui titles the document "herdr web ui" until a pane is selected and "<pane> · herdr"
+ * afterwards (App.tsx), so the live page is recognised by either form.
+ */
+private const val TITLE_IS_HERDR =
+    "(document.title === 'herdr web ui' || document.title.endsWith(' · herdr'))"
+
+private fun awaitLivePage(timeoutMs: Long, extra: String = "true", detail: () -> String = { "" }) {
+    Qa.until(timeoutMs, "live herdr page", detail) {
+        Qa.js("$TITLE_IS_HERDR && location.host === 'herdr.example.com' && ($extra)") == true
+    }
 }
 
 @RunWith(AndroidJUnit4::class)
@@ -50,10 +55,24 @@ class L1LiveLoadTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             // The workspace label is rendered from the /ws snapshot: seeing it proves the
             // cookie-authenticated WebSocket works.
-            awaitLivePage(60_000, "document.body.innerText.toLowerCase().indexOf(${JSONObject.quote(label.lowercase())}) >= 0")
+            val quoted = JSONObject.quote(label.lowercase())
+            awaitLivePage(
+                60_000,
+                "document.body.innerText.toLowerCase().indexOf($quoted) >= 0",
+            ) {
+                "title=${Qa.jsString("document.title")} bodyChars=${Qa.js("document.body.innerText.length")} " +
+                    "inText=${Qa.js("document.body.textContent.toLowerCase().indexOf($quoted) >= 0")}"
+            }
             assertEquals(0L, (Qa.js("window.__qaBlocked") as Number).toLong())
             val rewritten = (Qa.js("window.__qaRoleRewritten") as Number).toLong()
             assertTrue("guard saw no role frame rewritten to observe", rewritten >= 1)
+
+            // Open the workspace list drawer (a client-side toggle, nothing is sent) so the
+            // screenshot shows the list itself.
+            Qa.tap("button.drawer-toggle")
+            Qa.awaitJs("workspace drawer open", 20_000, "document.getElementById('workspace-drawer').getBoundingClientRect().left >= 0")
+            Qa.awaitFrame()
+            assertEquals(0L, (Qa.js("window.__qaBlocked") as Number).toLong())
             Qa.screenshot("l1.png")
         }
     }
