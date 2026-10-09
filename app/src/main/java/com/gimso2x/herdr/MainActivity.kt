@@ -14,4 +14,9 @@ class MainActivity : ComponentActivity() {
             Text("herdr")
         }
     }
+
+    companion object {
+        /** Pane to open, set by status-watcher notifications (handled in todo 7). */
+        const val EXTRA_PANE_ID = "pane_id"
+    }
 }

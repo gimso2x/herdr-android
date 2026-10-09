@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">herdr</string>
+    <string name="channel_watch">에이전트 알림 대기</string>
+    <string name="channel_needs_input">입력 필요</string>
+    <string name="channel_finished">작업 완료</string>
+    <string name="watch_waiting">에이전트 알림 대기 중</string>
+    <string name="watch_disconnected">연결 끊김 · 재시도 중</string>
 </resources>

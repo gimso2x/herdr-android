@@ -1,0 +1,48 @@
+{
+  "snapshot": {
+    "workspaces": [
+      {
+        "workspace_id": "w11",
+        "label": "work"
+      },
+      {
+        "workspace_id": "w12",
+        "label": "ws-b"
+      },
+      {
+        "workspace_id": "w13",
+        "label": "work"
+      }
+    ],
+    "panes": [
+      {
+        "pane_id": "w11:p1",
+        "workspace_id": "w11",
+        "agent_status": "working",
+        "agent": "omp",
+        "terminal_title_stripped": "π Fixture task 1"
+      },
+      {
+        "pane_id": "w12:p1",
+        "workspace_id": "w12",
+        "agent_status": "working",
+        "agent": "omp",
+        "terminal_title_stripped": "π Fixture task 2"
+      },
+      {
+        "pane_id": "w13:p1",
+        "workspace_id": "w13",
+        "agent_status": "working",
+        "agent": "omp",
+        "terminal_title_stripped": "π Fixture task 3"
+      },
+      {
+        "pane_id": "w13:p2",
+        "workspace_id": "w13",
+        "agent_status": "done",
+        "agent": "omp",
+        "terminal_title_stripped": "π Fixture task 4"
+      }
+    ]
+  }
+}
