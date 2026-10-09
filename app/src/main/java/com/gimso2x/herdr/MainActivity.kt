@@ -54,6 +54,8 @@ import com.gimso2x.herdr.shell.AccessTestHooks
 import com.gimso2x.herdr.shell.BackAction
 import com.gimso2x.herdr.shell.BackPolicy
 import com.gimso2x.herdr.shell.DeepLink
+import com.gimso2x.herdr.shell.HerdrChromeClient
+import com.gimso2x.herdr.shell.HerdrDownloadListener
 import com.gimso2x.herdr.shell.LiveQaGuard
 import com.gimso2x.herdr.shell.RefreshOutcome
 import com.gimso2x.herdr.shell.RefreshScheduler
@@ -109,6 +111,39 @@ class MainActivity : ComponentActivity() {
     private val notificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { _ -> }
+
+    // File chooser / microphone: launchers are registered here (before STARTED); the chrome client
+    // owns the WebView callbacks and always resolves them.
+    private val filePickerSingle = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        chromeClient.onFilesPicked(listOfNotNull(uri))
+    }
+    private val filePickerMulti = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        chromeClient.onFilesPicked(uris)
+    }
+    private val audioPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> chromeClient.onAudioPermissionResult(granted) }
+
+    private val chromeClient = HerdrChromeClient(
+        host = object : HerdrChromeClient.Host {
+            override fun launchFilePicker(mimeType: String, multiple: Boolean) =
+                if (multiple) filePickerMulti.launch(mimeType) else filePickerSingle.launch(mimeType)
+
+            override fun hasAudioPermission(): Boolean =
+                ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO) ==
+                    PackageManager.PERMISSION_GRANTED
+
+            override fun launchAudioPermission() = audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+
+            override fun loadInApp(url: String) = navigate(url)
+
+            override fun openExternal(url: String) = launchExternal(url)
+
+            override fun popupContext(): android.content.Context = this@MainActivity
+        },
+        urlPolicy = policy,
+        baseUrl = { HerdrConfig.baseUrl },
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
@@ -254,6 +289,8 @@ class MainActivity : ComponentActivity() {
                 keepSplash = false
             }
         }
+        view.webChromeClient = chromeClient
+        view.setDownloadListener(HerdrDownloadListener(this, { HerdrConfig.baseUrl }, ::launchExternal))
         // Must precede every page load (including restoreState) so the live site is never unguarded.
         LiveQaGuard.installIfEnabled(this, view)
         return view
