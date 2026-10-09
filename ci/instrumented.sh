@@ -250,9 +250,6 @@ adb shell wm dismiss-keyguard
 adb shell settings put secure show_ime_with_hard_keyboard 1
 # A system "isn't responding" dialog would steal window focus from the app under test.
 adb shell settings put global hide_error_dialogs 1
-# Play services is not needed by any scenario; on the 2-core runner it ANRs and, when it dies, the
-# system kills every process holding one of its providers (including the app under test).
-adb shell pm disable-user --user 0 com.google.android.gms >/dev/null 2>&1 || echo "note: could not disable play services"
 adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS
 
 for g in $FULL_ORDER; do
