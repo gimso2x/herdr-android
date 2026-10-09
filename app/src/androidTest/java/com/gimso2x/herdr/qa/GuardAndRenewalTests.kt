@@ -102,7 +102,7 @@ class A1RenewalTest {
     fun cookieIsRenewedWhileOpen() {
         Qa.resetState(alerts = false, token = Qa.syntheticToken())
         val clock = FakeClock()
-        val fx = Fixture(host = "localhost")
+        val fx = Fixture()
         fx.clock = clock
         fx.routes["/"] = { fx.html("a1", "<div id=m>a1</div>") }
         fx.routes["/probe"] = { MockResponse().setBody("ok") }
@@ -161,7 +161,7 @@ class A2RenewalRejectedTest {
     fun rejectedRenewalOpensSetup() {
         Qa.resetState(alerts = false, token = Qa.syntheticToken())
         val clock = FakeClock()
-        val fx = Fixture(host = "localhost")
+        val fx = Fixture()
         fx.clock = clock
         fx.healthStatus = { n -> if (n >= 2) 403 else 200 }
         fx.routes["/"] = { fx.html("a2", "<div id=m>a2</div>") }

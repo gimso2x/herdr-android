@@ -45,8 +45,6 @@ class WatchFixture {
     init {
         states[PANE_1] = "idle"
         states[PANE_2] = "idle"
-        // The poller reads the cookie for the base URL: keep it plain so it is returned for http.
-        fx.secureCookie = false
         fx.routes["/"] = { fx.html("watch", "<div id=m>watch</div>") }
         fx.routes["/api/session"] = {
             MockResponse().setHeader("Content-Type", "application/json").setBody(sessionJson())
@@ -214,8 +212,9 @@ class W2TapNotificationTest {
             }
             Qa.until(20_000, "MainActivity gone") { !Qa.mainActivityExists() }
 
+            Qa.recordLaunchIntents()
             Watch.tapNotification(WatchFixture.TITLE_1)
-            Qa.until(30_000, "cold start opened pane 1 chat", { "url=${Qa.currentUrl()}" }) {
+            Qa.until(30_000, "cold start opened pane 1 chat", { "url=${Qa.currentUrl()} launches=${Qa.launchIntents}" }) {
                 Qa.currentUrl()?.contains("pane=w1%3Ap1&view=chat") == true
             }
 

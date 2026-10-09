@@ -5,7 +5,7 @@ import android.database.Cursor
 
 /** DownloadManager queries shared by the download scenarios (L4, C5). */
 object DownloadAssertions {
-    data class Row(val id: Long, val status: Int, val mime: String?, val uri: String?, val title: String?)
+    data class Row(val id: Long, val status: Int, val mime: String?, val uri: String?, val title: String?, val reason: Int = 0)
 
     private fun rows(manager: DownloadManager): List<Row> {
         val cursor: Cursor = manager.query(DownloadManager.Query())
@@ -18,6 +18,7 @@ object DownloadAssertions {
                     mime = it.getString(it.getColumnIndexOrThrow(DownloadManager.COLUMN_MEDIA_TYPE)),
                     uri = it.getString(it.getColumnIndexOrThrow(DownloadManager.COLUMN_URI)),
                     title = it.getString(it.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE)),
+                    reason = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)),
                 )
             }
             return out
@@ -32,7 +33,7 @@ object DownloadAssertions {
     /** Waits (bounded) for the download whose URI ends with [pathSuffix] to reach STATUS_SUCCESSFUL. */
     fun awaitSuccessful(manager: DownloadManager, pathSuffix: String, timeoutMs: Long): Row {
         var found: Row? = null
-        Qa.until(timeoutMs, "download $pathSuffix successful") {
+        Qa.until(timeoutMs, "download $pathSuffix successful", { rows(manager).joinToString { "[status=${it.status} reason=${it.reason} uri=${it.uri?.substringAfterLast('/')}]" } }) {
             val row = rows(manager).firstOrNull { it.uri?.endsWith(pathSuffix) == true }
             if (row?.status == DownloadManager.STATUS_FAILED) {
                 throw AssertionError("download $pathSuffix failed")

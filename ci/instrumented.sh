@@ -65,7 +65,8 @@ run_phase() {
   else
     fail "phase $cls did not report OK"
     # Crash/diagnostic lines of the failed phase only: app tags, crashes, test failure facts.
-    adb logcat -d -s QaFail HerdrWatch HerdrBoot HerdrDownload AndroidRuntime:E ActivityManager:W chromium:E AudioRecord:W >"$OUT/$cls-log.txt" 2>&1 || true
+    adb logcat -d -s QaFail HerdrWatch HerdrBoot HerdrDownload AndroidRuntime:E >"$OUT/$cls-log.txt" 2>&1 || true
+    adb logcat -d -b all -t 600 '*:W' >"$OUT/$cls-log-all.txt" 2>&1 || true
     adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
   fi
 }

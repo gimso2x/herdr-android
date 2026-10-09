@@ -69,21 +69,47 @@ object Qa {
         }
     }
 
-    private var failureCount = 0
+    /** Name of the running test class, found on the stack (screenshot/log names). */
+    private fun testName(): String =
+        Thread.currentThread().stackTrace
+            .firstOrNull { it.className.startsWith("com.gimso2x.herdr.qa.") && it.className.endsWith("Test") }
+            ?.className?.substringAfterLast('.') ?: "unknown"
+
+    fun logFact(message: String) {
+        runCatching { shell("log -t QaFail ${message.replace(' ', '_')}") }
+    }
+
+    /** View/window focus of the app's WebView (document.hasFocus needs both). */
+    fun focusFacts(): String = onMain {
+        val webView = webViewUnsafe()
+        "webViewFocused=${webView?.isFocused} webViewHasFocus=${webView?.hasFocus()} windowFocus=${webView?.hasWindowFocus()}"
+    }
 
     /**
      * Failure evidence taken while the page is still up: a screenshot in /sdcard/Download/qa and a
      * few page/input-method facts in logcat tag QaFail (collected by ci/instrumented.sh).
      */
     private fun captureFailure(what: String) {
-        val n = ++failureCount
-        screenshot("fail-$n.png")
-        val facts = "url=${currentUrl()} activities=${liveActivityNames()} focus=${js("document.hasFocus()")}"
-        shell("log -t QaFail fail-$n:_${what.replace(' ', '_')}_$facts")
+        val name = testName()
+        screenshot("$name-fail.png")
+        logFact("$name: $what url=${currentUrl()} activities=${liveActivityNames()} docFocus=${js("document.hasFocus()")} ${focusFacts()}")
         shell("dumpsys input_method").lineSequence()
             .filter { it.contains("mInputShown") || it.contains("mCurFocusedWindow") }
             .take(6)
-            .forEach { shell("log -t QaFail ${it.trim().replace(' ', '_')}") }
+            .forEach { logFact("$name: ${it.trim()}") }
+    }
+
+    /** Launch intents of every MainActivity created from now on (action, flags, extra keys). */
+    val launchIntents = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+    fun recordLaunchIntents() {
+        onMain {
+            ActivityLifecycleMonitorRegistry.getInstance().addLifecycleCallback { activity, stage ->
+                if (stage == Stage.PRE_ON_CREATE && activity is MainActivity) {
+                    launchIntents += "action=${activity.intent.action} flags=0x${Integer.toHexString(activity.intent.flags)} extras=${activity.intent.extras?.keySet()}"
+                }
+            }
+        }
     }
 
     // --- main thread -------------------------------------------------------------------------
@@ -227,6 +253,7 @@ object Qa {
         }
         val x = origin[0] + (rect.getDouble(0) * rect.getDouble(2)).toInt()
         val y = origin[1] + (rect.getDouble(1) * rect.getDouble(2)).toInt()
+        logFact("tap $selector at $x,$y origin=${origin[0]},${origin[1]} dpr=${rect.getDouble(2)}")
         check(device.click(x, y)) { "tap on $selector was not injected" }
     }
 

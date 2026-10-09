@@ -16,11 +16,10 @@ import org.json.JSONObject
 
 /**
  * A MockWebServer on 127.0.0.1 inside the test process that also plays Cloudflare Access: its
- * `/api/health` hands out an unsigned test JWT cookie. [host] is only the name the app uses (it
- * must be a loopback name allowed by the debug network config); the server binds to 127.0.0.1. [start] points the debug base-URL override
+ * `/api/health` hands out an unsigned test JWT cookie. [start] points the debug base-URL override
  * at it, so call it AFTER [Qa.resetState] (which clears the override).
  */
-class Fixture(private val host: String = "127.0.0.1") {
+class Fixture {
     val routes = ConcurrentHashMap<String, (RecordedRequest) -> MockResponse>()
     val log = CopyOnWriteArrayList<RecordedRequest>()
 
@@ -29,7 +28,11 @@ class Fixture(private val host: String = "127.0.0.1") {
 
     @Volatile var clock: Clock = Clock.SYSTEM
 
-    @Volatile var secureCookie: Boolean = true
+    /**
+     * WebView refuses `Secure` cookies for http URLs for apps targeting >= R ("Strict Secure Cookie
+     * policy"), so the http fixture hands out plain cookies; https production cookies are Secure.
+     */
+    @Volatile var secureCookie: Boolean = false
 
     /** HTTP status of the n-th (1-based) `/api/health` request. */
     @Volatile var healthStatus: (Int) -> Int = { 200 }
@@ -55,7 +58,7 @@ class Fixture(private val host: String = "127.0.0.1") {
             }
         }
         server.start(InetAddress.getByName("127.0.0.1"), 0)
-        base = "http://$host:${server.port}"
+        base = "http://127.0.0.1:${server.port}"
         HerdrConfig.setDebugBaseUrl(base)
         return this
     }

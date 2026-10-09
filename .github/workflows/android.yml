@@ -115,14 +115,12 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Start PulseAudio for the emulator audio backend
-        # The emulator is started with audio on (microphone scenarios); without a PulseAudio
-        # server its backend fails to initialise and the guest microphone cannot be opened.
+      - name: Install PulseAudio for the emulator audio backend
+        # The emulator is started with audio on (microphone scenarios); without a running
+        # PulseAudio server its backend fails to initialise and the guest cannot open the microphone.
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq pulseaudio
-          pulseaudio --start --exit-idle-time=-1
-          pactl info | head -n 3
       - name: Write QA token file
         env:
           CF_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_CI }}
@@ -142,6 +140,7 @@ jobs:
           # No -noaudio: the microphone scenarios need the emulator's audio.
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -no-metrics
           disk-size: 4096M
+          pre-emulator-launch-script: pulseaudio --start --exit-idle-time=-1
           disable-animations: true
           script: ./ci/instrumented.sh ${{ matrix.api-level }}
       - name: Remove QA token file
