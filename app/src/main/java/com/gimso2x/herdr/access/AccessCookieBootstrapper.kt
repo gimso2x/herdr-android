@@ -4,7 +4,9 @@ import java.io.IOException
 import java.util.Base64
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -40,7 +42,12 @@ class AccessCookieBootstrapper(client: OkHttpClient, baseUrl: String) : CookieFe
         .build()
     private val healthUrl = (baseUrl.trimEnd('/') + "/api/health").toHttpUrl()
 
-    override suspend fun fetch(token: ServiceToken): BootstrapResult {
+    // Callers run on the main thread; the awaited response is classified and closed (closing may
+    // read the remaining body or write a stream reset) on the IO dispatcher, or StrictMode throws
+    // NetworkOnMainThreadException.
+    override suspend fun fetch(token: ServiceToken): BootstrapResult = withContext(Dispatchers.IO) { fetchOnIo(token) }
+
+    private suspend fun fetchOnIo(token: ServiceToken): BootstrapResult {
         val request = try {
             Request.Builder()
                 .url(healthUrl)
