@@ -51,8 +51,10 @@ android {
     buildTypes {
         debug {
             debuggable true
-            // Same stable key as release so debug and release builds replace each other.
-            signingConfig signingConfigs.findByName('release')
+            // Same stable key as release so debug and release builds replace each other; without
+            // release signing properties (CI emulator job, forks) fall back to the default debug
+            // key, otherwise AGP creates no installDebug/installDebugAndroidTest tasks at all.
+            signingConfig signingConfigs.findByName('release') ?: signingConfigs.getByName('debug')
         }
         release {
             signingConfig signingConfigs.findByName('release')
