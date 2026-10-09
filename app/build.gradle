@@ -2,6 +2,15 @@ apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
 apply plugin: 'org.jetbrains.kotlin.plugin.compose'
 
+def signingPropertiesPath = System.getenv('HERDR_SIGNING_PROPERTIES')
+def releaseSigningPropertiesFile = signingPropertiesPath
+    ? file(signingPropertiesPath)
+    : file("${System.properties['user.home']}/.config/herdr-android/signing/signing.properties")
+def releaseSigningProperties = new Properties()
+if (releaseSigningPropertiesFile.exists()) {
+    releaseSigningPropertiesFile.withInputStream { releaseSigningProperties.load(it) }
+}
+
 android {
     namespace = "com.gimso2x.herdr"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -27,15 +36,36 @@ android {
     testOptions {
         animationsDisabled true
     }
+    signingConfigs {
+        if (releaseSigningPropertiesFile.exists()) {
+            release {
+                storeFile file(releaseSigningProperties['storeFile'])
+                storePassword releaseSigningProperties['storePassword']
+                keyAlias releaseSigningProperties['keyAlias']
+                keyPassword releaseSigningProperties['keyPassword']
+                enableV1Signing false
+                enableV2Signing true
+            }
+        }
+    }
     buildTypes {
         debug {
             debuggable true
+            // Same stable key as release so debug and release builds replace each other.
+            signingConfig signingConfigs.findByName('release')
         }
         release {
+            signingConfig signingConfigs.findByName('release')
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+    }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.name.toLowerCase().contains('release') } && !releaseSigningPropertiesFile.exists()) {
+        throw new GradleException("Release signing properties not found at ${releaseSigningPropertiesFile}")
     }
 }
 
