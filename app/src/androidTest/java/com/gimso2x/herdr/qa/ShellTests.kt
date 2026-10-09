@@ -261,3 +261,30 @@ class R1ServedRevisionTest {
         }
     }
 }
+
+/**
+ * Harness warm-up, not a product scenario: the very first soft-keyboard use after an emulator boot
+ * starts the IME process and can drop the first show request, which would make whichever keyboard
+ * scenario runs first fail. A Compose text field (Setup) brings the IME up with a generous bound.
+ */
+@RunWith(AndroidJUnit4::class)
+class ImeWarmupTest {
+    @After fun tearDown() = Qa.hooksReset()
+
+    @Test
+    fun keyboardComesUp() {
+        Qa.resetState(alerts = false, token = null)
+        ActivityScenario.launch<com.gimso2x.herdr.SetupActivity>(com.gimso2x.herdr.SetupActivity.intent(Qa.targetContext)).use {
+            val field = Qa.device.wait(androidx.test.uiautomator.Until.findObject(androidx.test.uiautomator.By.clazz("android.widget.EditText")), 60_000)
+            assertNotNull("no text field on the setup screen", field)
+            field.click()
+            Qa.until(90_000, "keyboard shown for the warm-up") {
+                Qa.shell("dumpsys input_method").contains("mInputShown=true")
+            }
+            Qa.device.pressBack()
+            Qa.until(30_000, "keyboard hidden after the warm-up") {
+                !Qa.shell("dumpsys input_method").contains("mInputShown=true")
+            }
+        }
+    }
+}

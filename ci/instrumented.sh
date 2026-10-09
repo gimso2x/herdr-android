@@ -257,6 +257,9 @@ adb shell settings put secure show_ime_with_hard_keyboard 1
 adb shell settings put global hide_error_dialogs 1
 adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS
 
+# Harness warm-up (keyboard process cold start); skipped for debug runs that name phases.
+if [ -z "${QA_PHASES:-}" ] || [[ " $QA_PHASES " == *" Warmup "* ]]; then run_phase ImeWarmupTest; fi
+
 for g in $FULL_ORDER; do
   if selected "$g"; then group "$g"; fi
 done
