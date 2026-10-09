@@ -1,0 +1,60 @@
+name: Android
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+        with:
+          # v3's default also installs the obsolete `tools` package, which
+          # current runner cmdline-tools no longer provide.
+          packages: platform-tools
+      - name: Install Android SDK
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Assemble, unit test and lint
+        run: ./gradlew --no-daemon assembleDebug assembleDebugAndroidTest testDebugUnitTest lintDebug
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: app/build/reports/tests/testDebugUnitTest/
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.html
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Upload debug APKs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: herdr-debug-apk
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          retention-days: 7
+          if-no-files-found: error
