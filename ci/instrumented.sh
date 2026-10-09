@@ -58,11 +58,14 @@ run_phase() {
   local cls="$1" out="$OUT/$1.txt"
   RAN+=("$cls")
   echo "=== phase $cls (api $API)"
+  adb logcat -c
   timeout "$PHASE_TIMEOUT" adb shell am instrument -w -r -e class "$TEST_PKG.$cls" "$RUNNER" 2>&1 | tee "$out"
   if grep -q '^OK (' "$out" && ! grep -q 'FAILURES!!!' "$out"; then
     echo "=== phase $cls: OK"
   else
     fail "phase $cls did not report OK"
+    # Crash/diagnostic lines of the failed phase only: app tags, crashes, test failure facts.
+    adb logcat -d -s QaFail HerdrWatch HerdrBoot HerdrDownload AndroidRuntime:E ActivityManager:W chromium:E AudioRecord:W >"$OUT/$cls-log.txt" 2>&1 || true
     adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
   fi
 }
@@ -135,6 +138,10 @@ unroot() {
 w3_group() {
   : >"$HOST"
   run_phase W3SeedOnTest
+  # A real boot sends BOOT_COMPLETED with the system's temporary foreground-service allowlist; a
+  # shell broadcast has none ("Background started FGS: Disallowed"). The power allowlist is the
+  # documented equivalent exemption, so the FGS start path itself can still be exercised.
+  adb shell cmd deviceidle whitelist "+$PKG" >/dev/null 2>&1 || true
   if boot_broadcast; then
     if wait_until 30 boot_log_has "boot: starting"; then
       hc "logcat HerdrBoot: boot: starting"
@@ -153,6 +160,7 @@ w3_group() {
     fi
     dump_boot_log on
   fi
+  adb shell cmd deviceidle whitelist "-$PKG" >/dev/null 2>&1 || true
   unroot
 
   run_phase W3SeedOffTest

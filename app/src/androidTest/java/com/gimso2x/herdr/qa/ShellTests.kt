@@ -170,7 +170,7 @@ class F4BackOrderTest {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 Qa.awaitJs("page /a", 30_000, "location.pathname === '/a' && document.getElementById('a') !== null")
                 Qa.js("(function(){location.href='/b';return 1})()")
-                Qa.awaitJs("page /b", 30_000, "location.pathname === '/b' && document.getElementById('i') !== null")
+                Qa.awaitJs("page /b", 30_000, "location.pathname === '/b' && document.getElementById('i') !== null && document.readyState === 'complete'")
 
                 Qa.tap("#i")
                 Qa.until(20_000, "keyboard shown") { Qa.isImeVisible() }

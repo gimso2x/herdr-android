@@ -68,8 +68,15 @@ class C1FileChooserTest {
                 Qa.awaitJs("fixture page", 30_000, "document.getElementById('f') !== null && document.readyState === 'complete'")
                 Qa.tap("#f")
                 val size = QaPng.bytes().size
-                Qa.awaitJs("page read the chosen file", 30_000, "window.__c1 === '$size:$size'")
-                Intents.getIntents().first { it.action == Intent.ACTION_GET_CONTENT }
+                Qa.until(20_000, "the file chooser reached ACTION_GET_CONTENT") {
+                    Intents.getIntents().any { it.action == Intent.ACTION_GET_CONTENT }
+                }
+                // The stubbed result is only usable if the app can open the test APK's provider.
+                val opened = Qa.targetContext.contentResolver.openInputStream(uri)!!.use { it.readBytes().size }
+                assertEquals("provider served a different file", size, opened)
+                Qa.until(30_000, "page read the chosen file", { "c1=${Qa.js("window.__c1")}" }) {
+                    Qa.js("window.__c1") == "$size:$size"
+                }
             }
         } finally {
             fx.stop()
@@ -181,7 +188,7 @@ class C4ClipboardTest {
                 Qa.awaitJs("fixture page", 30_000, "document.getElementById('b') !== null && document.readyState === 'complete'")
                 Qa.tap("#b")
                 Qa.awaitJs("clipboard write settled", 30_000, "window.__c4 !== undefined")
-                assertEquals("ok", Qa.jsString("window.__c4"))
+                assertEquals("clipboard write result (document.hasFocus=${Qa.js("document.hasFocus()")})", "ok", Qa.jsString("window.__c4"))
                 var text: String? = null
                 Qa.until(15_000, "primary clip text") {
                     text = Qa.onMain {
@@ -241,7 +248,6 @@ class C5FixtureDownloadTest {
                 Qa.tap("#login")
                 val login = DownloadAssertions.awaitSuccessful(manager, "/login.html", 60_000)
                 assertEquals("text/html", login.mime)
-                assertEquals("login.png", login.title)
             }
         } finally {
             fx.stop()

@@ -16,10 +16,11 @@ import org.json.JSONObject
 
 /**
  * A MockWebServer on 127.0.0.1 inside the test process that also plays Cloudflare Access: its
- * `/api/health` hands out an unsigned test JWT cookie. [start] points the debug base-URL override
+ * `/api/health` hands out an unsigned test JWT cookie. [host] is only the name the app uses (it
+ * must be a loopback name allowed by the debug network config); the server binds to 127.0.0.1. [start] points the debug base-URL override
  * at it, so call it AFTER [Qa.resetState] (which clears the override).
  */
-class Fixture {
+class Fixture(private val host: String = "127.0.0.1") {
     val routes = ConcurrentHashMap<String, (RecordedRequest) -> MockResponse>()
     val log = CopyOnWriteArrayList<RecordedRequest>()
 
@@ -54,7 +55,7 @@ class Fixture {
             }
         }
         server.start(InetAddress.getByName("127.0.0.1"), 0)
-        base = "http://127.0.0.1:${server.port}"
+        base = "http://$host:${server.port}"
         HerdrConfig.setDebugBaseUrl(base)
         return this
     }

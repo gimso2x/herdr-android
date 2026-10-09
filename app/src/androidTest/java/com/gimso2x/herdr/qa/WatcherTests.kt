@@ -215,7 +215,7 @@ class W2TapNotificationTest {
             Qa.until(20_000, "MainActivity gone") { !Qa.mainActivityExists() }
 
             Watch.tapNotification(WatchFixture.TITLE_1)
-            Qa.until(30_000, "cold start opened pane 1 chat") {
+            Qa.until(30_000, "cold start opened pane 1 chat", { "url=${Qa.currentUrl()}" }) {
                 Qa.currentUrl()?.contains("pane=w1%3Ap1&view=chat") == true
             }
 
@@ -225,7 +225,7 @@ class W2TapNotificationTest {
             Watch.awaitAlert(WatchNotifications.CHANNEL_NEEDS_INPUT, WatchFixture.PANE_2)
             assertTrue(Qa.mainActivityExists())
             Watch.tapNotification(WatchFixture.TITLE_2)
-            Qa.until(30_000, "warm onNewIntent opened pane 2 chat") {
+            Qa.until(30_000, "warm onNewIntent opened pane 2 chat", { "url=${Qa.currentUrl()}" }) {
                 Qa.currentUrl()?.contains("pane=w1%3Ap2&view=chat") == true
             }
         } finally {

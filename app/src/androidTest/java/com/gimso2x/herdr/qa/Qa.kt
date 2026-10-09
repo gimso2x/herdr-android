@@ -53,18 +53,37 @@ object Qa {
     val app: HerdrApplication get() = targetContext.applicationContext as HerdrApplication
     val device: UiDevice get() = UiDevice.getInstance(instr)
 
-    // --- waiting -----------------------------------------------------------------------------
-
-    /** Re-evaluates [condition] until it holds; fails with [what] after [timeoutMs]. */
-    fun until(timeoutMs: Long, what: String, condition: () -> Boolean) {
+    /**
+     * Re-evaluates [condition] until it holds; fails with [what] (plus [detail], evaluated only
+     * on failure) after [timeoutMs].
+     */
+    fun until(timeoutMs: Long, what: String, detail: () -> String = { "" }, condition: () -> Boolean) {
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
         while (true) {
             if (condition()) return
             if (SystemClock.elapsedRealtime() >= deadline) {
-                throw AssertionError("timed out after $timeoutMs ms waiting for: $what")
+                runCatching { captureFailure(what) }
+                throw AssertionError("timed out after $timeoutMs ms waiting for: $what ${runCatching(detail).getOrDefault("")}")
             }
             SystemClock.sleep(POLL_MS)
         }
+    }
+
+    private var failureCount = 0
+
+    /**
+     * Failure evidence taken while the page is still up: a screenshot in /sdcard/Download/qa and a
+     * few page/input-method facts in logcat tag QaFail (collected by ci/instrumented.sh).
+     */
+    private fun captureFailure(what: String) {
+        val n = ++failureCount
+        screenshot("fail-$n.png")
+        val facts = "url=${currentUrl()} activities=${liveActivityNames()} focus=${js("document.hasFocus()")}"
+        shell("log -t QaFail fail-$n:_${what.replace(' ', '_')}_$facts")
+        shell("dumpsys input_method").lineSequence()
+            .filter { it.contains("mInputShown") || it.contains("mCurFocusedWindow") }
+            .take(6)
+            .forEach { shell("log -t QaFail ${it.trim().replace(' ', '_')}") }
     }
 
     // --- main thread -------------------------------------------------------------------------
@@ -216,3 +235,4 @@ object Qa {
         awaitJs("page on $host", timeoutMs, "location.host === ${JSONObject.quote(host)} && document.readyState === 'complete'")
     }
 }
+
