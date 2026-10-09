@@ -6,7 +6,7 @@ import androidx.core.content.ContextCompat
 import com.gimso2x.herdr.AppPreferences
 import com.gimso2x.herdr.HerdrApplication
 
-enum class StartDecision { STARTED, ALERTS_OFF, NO_TOKEN }
+enum class StartDecision { STARTED, ALERTS_OFF, NO_TOKEN, START_FAILED }
 
 /** Starts/stops [StatusWatcherService]. Call only from a visible activity or BOOT_COMPLETED. */
 object WatcherController {
@@ -26,14 +26,14 @@ object WatcherController {
 
     fun start(context: Context): StartDecision {
         val decision = decide(context)
-        if (decision == StartDecision.STARTED) {
-            try {
-                ContextCompat.startForegroundService(context, StatusWatcherService.intent(context))
-            } catch (e: Exception) {
-                Log.w("HerdrWatch", "start failed: ${e.javaClass.simpleName}")
-            }
+        if (decision != StartDecision.STARTED) return decision
+        return try {
+            ContextCompat.startForegroundService(context, StatusWatcherService.intent(context))
+            decision
+        } catch (e: Exception) {
+            Log.w("HerdrWatch", "start failed: ${e.javaClass.simpleName}")
+            StartDecision.START_FAILED
         }
-        return decision
     }
 
     fun stop(context: Context) {
