@@ -114,30 +114,40 @@ class MainActivity : ComponentActivity() {
 
     // File chooser / microphone: launchers are registered here (before STARTED); the chrome client
     // owns the WebView callbacks and always resolves them.
-    private val filePickerSingle = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        chromeClient.onFilesPicked(listOfNotNull(uri))
-    }
-    private val filePickerMulti = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
-        chromeClient.onFilesPicked(uris)
-    }
-    private val audioPermission = registerForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted -> chromeClient.onAudioPermissionResult(granted) }
+    private val filePickerSingle: androidx.activity.result.ActivityResultLauncher<String> =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+            chromeClient.onFilesPicked(listOfNotNull(uri))
+        }
+    private val filePickerMulti: androidx.activity.result.ActivityResultLauncher<String> =
+        registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris: List<Uri> ->
+            chromeClient.onFilesPicked(uris)
+        }
+    private val audioPermission: androidx.activity.result.ActivityResultLauncher<String> =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted: Boolean ->
+            chromeClient.onAudioPermissionResult(granted)
+        }
 
-    private val chromeClient = HerdrChromeClient(
+    private val chromeClient: HerdrChromeClient = HerdrChromeClient(
         host = object : HerdrChromeClient.Host {
-            override fun launchFilePicker(mimeType: String, multiple: Boolean) =
+            override fun launchFilePicker(mimeType: String, multiple: Boolean) {
                 if (multiple) filePickerMulti.launch(mimeType) else filePickerSingle.launch(mimeType)
+            }
 
             override fun hasAudioPermission(): Boolean =
                 ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO) ==
                     PackageManager.PERMISSION_GRANTED
 
-            override fun launchAudioPermission() = audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+            override fun launchAudioPermission() {
+                audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+            }
 
-            override fun loadInApp(url: String) = navigate(url)
+            override fun loadInApp(url: String) {
+                navigate(url)
+            }
 
-            override fun openExternal(url: String) = launchExternal(url)
+            override fun openExternal(url: String) {
+                launchExternal(url)
+            }
 
             override fun popupContext(): android.content.Context = this@MainActivity
         },
