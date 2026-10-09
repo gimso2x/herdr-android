@@ -13,8 +13,16 @@ class AppPreferences(context: Context) {
             prefs.edit().putBoolean(KEY_ALERTS_ENABLED, value).apply()
         }
 
+    /** Whether the one-time notification permission prompt has been shown. */
+    var notificationPermissionAsked: Boolean
+        get() = prefs.getBoolean(KEY_NOTIFICATION_ASKED, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_NOTIFICATION_ASKED, value).apply()
+        }
+
     private companion object {
         const val FILE = "herdr_prefs"
         const val KEY_ALERTS_ENABLED = "alerts_enabled"
+        const val KEY_NOTIFICATION_ASKED = "notification_permission_asked"
     }
 }

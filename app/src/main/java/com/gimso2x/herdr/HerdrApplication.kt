@@ -7,6 +7,7 @@ import com.gimso2x.herdr.access.Clock
 import com.gimso2x.herdr.access.CookieInstaller
 import com.gimso2x.herdr.access.EncryptedTokenStore
 import com.gimso2x.herdr.access.TokenStore
+import com.gimso2x.herdr.shell.AccessTestHooks
 import okhttp3.OkHttpClient
 
 class HerdrApplication : Application() {
@@ -20,7 +21,7 @@ class HerdrApplication : Application() {
             fetcher = AccessCookieBootstrapper(OkHttpClient(), baseUrl),
             store = tokenStore,
             installer = CookieInstaller(baseUrl),
-            clock = Clock.SYSTEM,
+            clock = AccessTestHooks.clock ?: Clock.SYSTEM,
         )
     }
 }

@@ -28,4 +28,7 @@
     <string name="settings_notifications_off">알림 권한이 꺼져 있습니다</string>
     <string name="settings_open_notification_settings">설정 열기</string>
     <string name="shortcut_settings">설정</string>
+
+    <string name="shell_network_error">서버에 연결할 수 없습니다</string>
+    <string name="shell_retry">다시 시도</string>
 </resources>
