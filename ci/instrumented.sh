@@ -218,7 +218,7 @@ if [ ! -s "$TOKEN_FILE" ]; then
   exit 1
 fi
 
-if ! ./gradlew --no-daemon installDebug installDebugAndroidTest; then
+if ! ./gradlew --no-daemon :app:installDebug :app:installDebugAndroidTest; then
   echo "gradle install failed"
   exit 1
 fi
