@@ -3,6 +3,9 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Chromium's audio manager needs it to select a recording device: without it getUserMedia
+         fails with NotReadableError even though RECORD_AUDIO is granted. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-feature
         android:name="android.hardware.microphone"
         android:required="false" />
