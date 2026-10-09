@@ -200,6 +200,11 @@ group() {
       adb shell pm revoke "$PKG" android.permission.POST_NOTIFICATIONS
       run_phase W4PermissionOffTest
       adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS
+# Let the freshly booted system settle (Play services ANRs and dying providers would kill the app
+# under test) and make sure the soft keyboard service is up before any scenario types.
+timeout 120 adb shell am wait-for-broadcast-idle >/dev/null 2>&1 || echo "note: broadcast queues not idle after 120 s"
+ime_ready() { adb shell dumpsys input_method 2>/dev/null | grep -q 'mCurMethodId=.\+'; }
+wait_until 60 ime_ready || echo "note: no current input method reported"
       ;;
     Sstore)
       run_phase SStoreWriteTest
