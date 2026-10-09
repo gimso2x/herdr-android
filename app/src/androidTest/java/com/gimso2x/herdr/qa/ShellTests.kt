@@ -163,13 +163,17 @@ class F4BackOrderTest {
         val fx = Fixture()
         // "/" redirects, so the history is exactly [/a, /b].
         fx.routes["/"] = { MockResponse().setResponseCode(302).setHeader("Location", "/a") }
-        fx.routes["/a"] = { fx.html("f4-a", "<div id=a>a</div>") }
+        fx.routes["/a"] = {
+            fx.html("f4-a", "<a id=go href=\"/b\" style=\"display:block;height:80px\">to b</a><div id=a>a</div>")
+        }
         fx.routes["/b"] = { fx.html("f4-b", "<input id=i type=text style=\"width:80%;height:60px\">") }
         fx.start()
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 Qa.awaitJs("page /a", 30_000, "location.pathname === '/a' && document.getElementById('a') !== null")
-                Qa.js("(function(){location.href='/b';return 1})()")
+                // A real tap: Chromium's history-manipulation intervention makes Back skip an entry
+                // that was left without any user activation (a script-driven navigation).
+                Qa.tap("#go")
                 Qa.awaitJs("page /b", 30_000, "location.pathname === '/b' && document.getElementById('i') !== null && document.readyState === 'complete'")
 
                 Qa.tap("#i")
