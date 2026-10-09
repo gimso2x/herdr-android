@@ -106,6 +106,10 @@ jobs:
           packages: platform-tools
       - name: Install Android SDK
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Build the debug and test APKs before the emulator starts
+        # Keeps the CPU/RAM-hungry Gradle build away from the booted emulator (ANR dialogs and
+        # low-memory kills); ci/instrumented.sh then only has to install the up-to-date outputs.
+        run: ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
       - name: Free disk space for the emulator userdata partition
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/local/lib/android/sdk/ndk /opt/hostedtoolcache/CodeQL
@@ -140,6 +144,8 @@ jobs:
           # No -noaudio: the microphone scenarios need the emulator's audio.
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -no-metrics
           disk-size: 4096M
+          ram-size: 4096M
+          heap-size: 512M
           pre-emulator-launch-script: pulseaudio --start --exit-idle-time=-1
           disable-animations: true
           script: ./ci/instrumented.sh ${{ matrix.api-level }}

@@ -70,6 +70,7 @@ run_phase() {
     # Crash/diagnostic lines of the failed phase only: app tags, crashes, test failure facts.
     adb logcat -d -s QaFail HerdrWatch HerdrBoot HerdrDownload AndroidRuntime:E >"$OUT/$cls-log.txt" 2>&1 || true
     adb logcat -d -b all -t 600 '*:W' >"$OUT/$cls-log-all.txt" 2>&1 || true
+    adb logcat -d -b events -s am_kill am_crash am_proc_died am_anr am_low_memory >"$OUT/$cls-events.txt" 2>&1 || true
     adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
   fi
 }
@@ -247,6 +248,8 @@ adb shell input keyevent KEYCODE_WAKEUP
 adb shell wm dismiss-keyguard
 # The soft keyboard must show even though the emulator reports a hardware keyboard (F4, F5).
 adb shell settings put secure show_ime_with_hard_keyboard 1
+# A system "isn't responding" dialog would steal window focus from the app under test.
+adb shell settings put global hide_error_dialogs 1
 adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS
 
 for g in $FULL_ORDER; do
