@@ -102,6 +102,10 @@ jobs:
           packages: platform-tools
       - name: Install Android SDK
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Free disk space for the emulator userdata partition
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/local/lib/android/sdk/ndk /opt/hostedtoolcache/CodeQL
+          df -h /home/runner
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -124,7 +128,8 @@ jobs:
           target: google_apis
           arch: x86_64
           # No -noaudio: the microphone scenarios need the emulator's audio.
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -no-metrics
+          disk-size: 4096M
           disable-animations: true
           script: ./ci/instrumented.sh ${{ matrix.api-level }}
       - name: Remove QA token file
