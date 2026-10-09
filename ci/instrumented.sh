@@ -67,6 +67,11 @@ run_phase() {
   fi
 }
 
+# Diagnostics for the host-orchestrated boot phases: app log tags only (no token is ever logged).
+dump_boot_log() {
+  adb logcat -d -s HerdrBoot HerdrWatch AndroidRuntime:E ActivityManager:W >"$OUT/W3-logcat-$1.txt" 2>&1 || true
+}
+
 wait_until() { # seconds command...
   local deadline=$((SECONDS + $1))
   shift
@@ -131,6 +136,11 @@ w3_group() {
   : >"$HOST"
   run_phase W3SeedOnTest
   if boot_broadcast; then
+    if wait_until 30 boot_log_has "boot: starting"; then
+      hc "logcat HerdrBoot: boot: starting"
+    else
+      fail "HerdrBoot did not log 'boot: starting'"
+    fi
     if wait_until 30 service_foreground; then
       hc "StatusWatcherService running with isForeground=true"
     else
@@ -141,11 +151,7 @@ w3_group() {
     else
       fail "channel herdr_watch not listed for $PKG"
     fi
-    if wait_until 30 boot_log_has "boot: starting"; then
-      hc "logcat HerdrBoot: boot: starting"
-    else
-      fail "HerdrBoot did not log 'boot: starting'"
-    fi
+    dump_boot_log on
   fi
   unroot
 
@@ -162,6 +168,7 @@ w3_group() {
       fail "HerdrBoot did not log 'boot: alerts off, not starting'"
     fi
   fi
+  dump_boot_log off
   unroot
   adb shell am force-stop "$PKG"
 
@@ -243,8 +250,10 @@ if selected L1 && [ ! -s "$OUT/l1.png" ]; then fail "l1.png was not produced"; f
 if [ -z "${QA_PHASES:-}" ]; then
   for g in $ALLOWED; do
     for cls in ${CLASSES[$g]}; do
-      if [ ! -s "$OUT/$cls.txt" ] || ! grep -q '^OK (' "$OUT/$cls.txt"; then
-        fail "missing or failing phase output for $cls"
+      if [ ! -s "$OUT/$cls.txt" ]; then
+        fail "missing phase output for $cls"
+      elif ! grep -q '^OK (' "$OUT/$cls.txt" && [[ " ${RAN[*]} " != *" $cls "* ]]; then
+        fail "phase $cls never ran"
       fi
     done
   done
