@@ -7,6 +7,7 @@
   window.__qaGuardInstalled = true;
   window.__qaDropped = 0;
   window.__qaBlocked = 0;
+  window.__qaRoleRewritten = 0;
   window.__qaDroppedTypes = {};
 
   // Client frame types from herdr-web-ui src/lib/ws.ts. Keep these two lists in sync with the
@@ -28,6 +29,7 @@
     var type = frame && typeof frame === 'object' ? frame.type : undefined;
     if (type === 'role') {
       frame.mode = 'observe';
+      window.__qaRoleRewritten += 1;
       return JSON.stringify(frame);
     }
     if (ALLOW_TYPES.indexOf(type) !== -1) return data;

@@ -1,0 +1,131 @@
+package com.gimso2x.herdr.qa
+
+import android.app.DownloadManager
+import android.content.Context
+import androidx.test.core.app.ActivityScenario
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Until
+import com.gimso2x.herdr.MainActivity
+import com.gimso2x.herdr.access.ServiceToken
+import com.gimso2x.herdr.shell.HerdrDownloadListener
+import com.gimso2x.herdr.shell.LiveQaGuard
+import org.json.JSONObject
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+
+// Live scenarios: base = https://herdr.example.com with LiveQaGuard on. They only render and GET;
+// the guard drops input/resize/... frames, rewrites the WebSocket role to observe and rejects any
+// non-GET/HEAD request (L1 asserts nothing was blocked).
+
+private const val TITLE = "herdr web ui"
+
+private fun liveGuardOn() {
+    check(LiveQaGuard.isSupported()) { "DOCUMENT_START_SCRIPT unsupported by this WebView" }
+    LiveQaGuard.enable(Qa.LIVE)
+}
+
+private fun awaitLivePage(timeoutMs: Long, extra: String = "true") {
+    Qa.awaitJs(
+        "live herdr page",
+        timeoutMs,
+        "document.title === ${JSONObject.quote(TITLE)} && location.host === 'herdr.example.com' && ($extra)",
+    )
+}
+
+@RunWith(AndroidJUnit4::class)
+class L1LiveLoadTest {
+    @After fun tearDown() = Qa.hooksReset()
+
+    @Test
+    fun liveLoad() {
+        val token = LiveSupport.token()
+        val label = LiveSupport.firstWorkspaceLabel(token)
+        Qa.resetState(alerts = false, token = token)
+        liveGuardOn()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            // The workspace label is rendered from the /ws snapshot: seeing it proves the
+            // cookie-authenticated WebSocket works.
+            awaitLivePage(60_000, "document.body.innerText.toLowerCase().indexOf(${JSONObject.quote(label.lowercase())}) >= 0")
+            assertEquals(0L, (Qa.js("window.__qaBlocked") as Number).toLong())
+            val rewritten = (Qa.js("window.__qaRoleRewritten") as Number).toLong()
+            assertTrue("guard saw no role frame rewritten to observe", rewritten >= 1)
+            Qa.screenshot("l1.png")
+        }
+    }
+}
+
+@RunWith(AndroidJUnit4::class)
+class L2BadTokenTest {
+    @After fun tearDown() = Qa.hooksReset()
+
+    @Test
+    fun badTokenShowsRejection() {
+        val real = LiveSupport.token()
+        Qa.resetState(alerts = false, token = ServiceToken(real.clientId, "wrong"))
+        liveGuardOn()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            val shown = Qa.device.wait(Until.hasObject(By.textContains("토큰이 거부되었습니다")), 45_000)
+            assertTrue("SetupActivity did not show the rejection", shown == true)
+            assertTrue(Qa.liveActivityNames().contains("SetupActivity"))
+        }
+    }
+}
+
+@RunWith(AndroidJUnit4::class)
+class L3ExpiryRecoveryTest {
+    @After fun tearDown() = Qa.hooksReset()
+
+    @Test
+    fun recoversAfterCookieExpiry() {
+        val token = LiveSupport.token()
+        Qa.resetState(alerts = false, token = token)
+        liveGuardOn()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            awaitLivePage(60_000)
+            Qa.js("(window.__l3old = 1)")
+            Qa.onMain {
+                android.webkit.CookieManager.getInstance().removeAllCookies(null)
+                android.webkit.CookieManager.getInstance().flush()
+            }
+            assertNull(Qa.cookieFor(Qa.LIVE))
+            Qa.reload()
+            var onAccess = false
+            Qa.until(60_000, "herdr page again after the reload (new document)") {
+                val host = Qa.jsString("location.host")
+                if (host == Qa.ACCESS_HOST) onAccess = true
+                Qa.js("window.__l3old === undefined && document.title === ${JSONObject.quote(TITLE)} && location.host === 'herdr.example.com'") == true
+            }
+            assertTrue("a Cloudflare Access page was displayed", !onAccess)
+            assertEquals("herdr.example.com", Qa.jsString("location.host"))
+        }
+    }
+}
+
+@RunWith(AndroidJUnit4::class)
+class L4LiveDownloadTest {
+    @After fun tearDown() = Qa.hooksReset()
+
+    @Test
+    fun faviconDownloadsThroughTheAppListener() {
+        val token = LiveSupport.token()
+        Qa.resetState(alerts = false, token = token)
+        liveGuardOn()
+        val context = Qa.targetContext
+        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        DownloadAssertions.removeAll(manager)
+        ActivityScenario.launch(MainActivity::class.java).use {
+            awaitLivePage(60_000)
+            val listener = HerdrDownloadListener(context, { Qa.LIVE }, { })
+            Qa.onMain { listener.onDownloadStart("${Qa.LIVE}/favicon.png", "qa", null, "image/png", -1) }
+            val row = DownloadAssertions.awaitSuccessful(manager, "/favicon.png", 60_000)
+            assertEquals("image/png", row.mime)
+            val head = DownloadAssertions.read(manager, row.id).take(4)
+            assertEquals(listOf(0x89, 0x50, 0x4E, 0x47), head.map { it.toInt() and 0xFF })
+        }
+    }
+}

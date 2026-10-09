@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- Serves the C1 fixture PNG to the app's WebView file chooser (see QaFileProvider). -->
+        <provider
+            android:name="com.gimso2x.herdr.qa.QaFileProvider"
+            android:authorities="com.gimso2x.herdr.test.fileprovider"
+            android:exported="true"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/qa_file_paths" />
+        </provider>
+    </application>
+</manifest>
