@@ -59,6 +59,9 @@ import com.gimso2x.herdr.shell.HerdrDownloadListener
 import com.gimso2x.herdr.shell.LiveQaGuard
 import com.gimso2x.herdr.shell.RefreshOutcome
 import com.gimso2x.herdr.shell.RefreshScheduler
+import com.gimso2x.herdr.shell.NotificationAction
+import com.gimso2x.herdr.shell.NotificationGate
+import com.gimso2x.herdr.shell.StartupNavigation
 import com.gimso2x.herdr.shell.UrlDecision
 import com.gimso2x.herdr.shell.UrlPolicy
 import com.gimso2x.herdr.ui.HerdrTheme
@@ -102,15 +105,22 @@ class MainActivity : ComponentActivity() {
 
     /** Saved WebView state waiting for a fresh session before it is restored (null on fresh starts). */
     private var pendingState: Bundle? = null
+
+    /** Start URL saved across a recreation that happened before the first load (our own pane URL). */
+    private var pendingStartUrl: String? = null
+
+    /** Pane URL delivered (intent) before the first load; wins over restored history. */
+    private var pendingPaneUrl: String? = null
     private var recovering = false
     private var setupOpened = false
 
     /** A failure sent the owner to setup; reload the last page when setup comes back with a token. */
     private var reloadAfterSetup = false
 
+    // Asked once per install before the watcher starts; the watcher never depends on the answer.
     private val notificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { _ -> }
+    ) { _ -> WatcherController.start(this) }
 
     // File chooser / microphone: launchers are registered here (before STARTED); the chrome client
     // owns the WebView callbacks and always resolves them.
@@ -167,9 +177,12 @@ class MainActivity : ComponentActivity() {
 
         webView = createWebView()
         pendingState = savedInstanceState?.getBundle(KEY_WEBVIEW)
+        // Only ever a URL we built on the herdr base; anything else in the bundle is dropped.
+        pendingStartUrl = savedInstanceState?.getString(KEY_PENDING_START_URL)?.takeIf { policy.isInApp(it) }
+        pendingStartUrl?.let { setStartUrl(it) }
         // A recreated activity gets the original launch intent again; its pane was already consumed.
         if (savedInstanceState == null) {
-            paneUrl(intent)?.let { setStartUrl(it) }
+            paneUrl(intent)?.let { navigate(it) }
             intent.removeExtra(EXTRA_PANE_ID)
         }
 
@@ -227,7 +240,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        WatcherController.start(this)
+        val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        val prefs = AppPreferences(this)
+        when (NotificationGate.decide(Build.VERSION.SDK_INT, granted, prefs.notificationPermissionAsked)) {
+            NotificationAction.START_WATCHER -> WatcherController.start(this)
+            NotificationAction.REQUEST_THEN_START -> {
+                prefs.notificationPermissionAsked = true
+                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -246,9 +269,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        // Before the first load there is nothing of ours to save; keep what we were handed.
-        val state = if (started.value) Bundle().also { webView.saveState(it) } else pendingState
-        if (state != null) outState.putBundle(KEY_WEBVIEW, state)
+        if (started.value) {
+            outState.putBundle(KEY_WEBVIEW, Bundle().also { webView.saveState(it) })
+        } else {
+            // Before the first load there is no history of ours: keep what we were handed.
+            pendingState?.let { outState.putBundle(KEY_WEBVIEW, it) }
+            (pendingPaneUrl ?: pendingStartUrl)?.let { outState.putString(KEY_PENDING_START_URL, it) }
+        }
     }
 
     override fun onDestroy() {
@@ -331,7 +358,7 @@ class MainActivity : ComponentActivity() {
                 RefreshOutcome.Fresh -> {
                     loadInitialPage()
                     started.value = true
-                    maybeRequestNotificationPermission()
+                    // POST_NOTIFICATIONS is requested in onStart, independent of startup success.
                 }
                 RefreshOutcome.KeepPage -> {
                     keepSplash = false
@@ -347,9 +374,22 @@ class MainActivity : ComponentActivity() {
 
     private fun loadInitialPage() {
         val saved = pendingState
+        val plan = StartupNavigation.resolve(
+            hasPendingState = saved != null,
+            pendingStartUrl = pendingStartUrl,
+            paneUrl = pendingPaneUrl,
+            rootUrl = startUrl,
+        )
         pendingState = null
-        if (saved != null && restoreHistory(saved)) return
-        webView.loadUrl(startUrl)
+        pendingStartUrl = null
+        pendingPaneUrl = null
+        val restored = plan.restoreHistory && saved != null && restoreHistory(saved)
+        // An explicit pane wins: load it on top of restored history (Back keeps working).
+        val explicit = plan.explicitUrl
+        when {
+            explicit != null -> webView.loadUrl(explicit)
+            !restored -> webView.loadUrl(plan.fallbackUrl)
+        }
     }
 
     /** Restores saved history; refuses state whose current page is not a herdr page (stale/foreign). */
@@ -363,6 +403,7 @@ class MainActivity : ComponentActivity() {
     private fun navigate(url: String) {
         if (!started.value) {
             setStartUrl(url)
+            pendingPaneUrl = url
             return
         }
         lifecycleScope.launch {
@@ -439,20 +480,6 @@ class MainActivity : ComponentActivity() {
     private fun isImeVisible(): Boolean =
         ViewCompat.getRootWindowInsets(window.decorView)?.isVisible(WindowInsetsCompat.Type.ime()) == true
 
-    /** Asks once per install (persisted), after a first successful startup. */
-    private fun maybeRequestNotificationPermission() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        val prefs = AppPreferences(this)
-        if (prefs.notificationPermissionAsked) return
-        prefs.notificationPermissionAsked = true
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            return
-        }
-        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-    }
-
     private fun paneUrl(intent: Intent?): String? {
         val pane = intent?.getStringExtra(EXTRA_PANE_ID)?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         return DeepLink.paneUrl(HerdrConfig.baseUrl, pane)
@@ -463,6 +490,7 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_PANE_ID = "pane_id"
 
         private const val KEY_WEBVIEW = "webview_state"
+        private const val KEY_PENDING_START_URL = "pending_start_url"
         private const val SPLASH_CAP_MILLIS = 8_000L
     }
 }
