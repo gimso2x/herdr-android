@@ -8,7 +8,27 @@
   }
   function style(e, p) { return e ? getComputedStyle(e)[p] : null; }
   function one(sel) { return document.querySelector(sel); }
-  function supports(p, v) { try { return CSS.supports(p, v); } catch (e) { return null; } }
+  function supports(p, v) { try { return v === undefined ? CSS.supports(p) : CSS.supports(p, v); } catch (e) { return null; } }
+  // Height in px of a fixed probe box for a CSS length (units that a WebView may resolve to 0).
+  function unit(v) {
+    var d = document.createElement('div');
+    d.style.cssText = 'position:fixed;left:0;top:0;width:1px;visibility:hidden;pointer-events:none;height:' + v;
+    document.documentElement.appendChild(d);
+    var h = Math.round(d.getBoundingClientRect().height);
+    d.remove();
+    return h;
+  }
+  // Height of .app with candidate CSS applied for the duration of one layout read.
+  function tryCss(css) {
+    var a = document.querySelector('.app');
+    if (!a) return null;
+    var s = document.createElement('style');
+    s.textContent = css;
+    document.head.appendChild(s);
+    var h = Math.round(a.getBoundingClientRect().height);
+    s.remove();
+    return h;
+  }
   var app = one('.app');
   var root = document.documentElement;
   var vv = window.visualViewport;
@@ -27,17 +47,27 @@
   var transcript = one('.chat-transcript');
   var chatView = one('.chat-view');
   var d = window.__diag || null;
+  var units = { vh: unit('100vh'), dvh: unit('100dvh'), svh: unit('100svh'), lvh: unit('100lvh'), pct: unit('100%'), vw: unit('100vw'), dvw: unit('100dvw') };
+  var fixes = {
+    rootVarVh: tryCss(':root{--app-height:100vh}'),
+    rootVarPx: tryCss(':root{--app-height:' + window.innerHeight + 'px}'),
+    appVh: tryCss('.app{height:100vh}'),
+    appFill: tryCss('.app{height:100%}'),
+  };
+  var chain = ['html', 'body', '#root'].map(function (s) { var e = one(s); return e ? Math.round(e.getBoundingClientRect().height) : null; });
   return {
     env: {
       ua: navigator.userAgent.replace(/\([^)]*\)/, '(..)').slice(0, 120),
       coarse: matchMedia('(pointer: coarse)').matches,
       iw: window.innerWidth, ih: window.innerHeight, vvh: vv ? Math.round(vv.height) : null,
       dpr: window.devicePixelRatio, screenH: screen.height, clientH: root.clientHeight,
-      dvh: supports('height', '100dvh'), lvh: supports('height', '100lvh'), has: supports('selector(:has(a))', ''),
+      dvh: supports('height', '100dvh'), lvh: supports('height', '100lvh'), has: supports('selector(:has(a))'),
       decompressionStream: typeof DecompressionStream, resizeObserver: typeof ResizeObserver,
       structuredClone: typeof structuredClone, at: typeof [].at, replaceAll: typeof ''.replaceAll,
       keyboardAttr: root.hasAttribute('data-keyboard'), appHeightVar: root.style.getPropertyValue('--app-height') || null,
     },
+    units: units, fixes: fixes, chain: chain,
+    appHeightVarComputed: app ? getComputedStyle(app).getPropertyValue('--app-height') : null,
     page: {
       host: location.host, pathname: location.pathname,
       searchKeys: Array.from(new URLSearchParams(location.search).keys()).join(','),

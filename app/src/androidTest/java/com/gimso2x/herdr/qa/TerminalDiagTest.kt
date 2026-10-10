@@ -74,7 +74,7 @@ class TerminalDiagTest {
             log(scenario, "metrics", "unavailable")
             return
         }
-        for (key in listOf("env", "page", "layout", "xtermCount", "xterms", "anyXtermTall", "anyXtermRows", "chat", "ws", "diag")) {
+        for (key in listOf("env", "units", "fixes", "chain", "appHeightVarComputed", "page", "layout", "xtermCount", "xterms", "anyXtermTall", "anyXtermRows", "chat", "ws", "diag")) {
             log(scenario, key, m.opt(key))
         }
         log(scenario, "verdict", "xterms=${m.optInt("xtermCount")} anyTall=${m.optBoolean("anyXtermTall")} anyRows=${m.optBoolean("anyXtermRows")}")

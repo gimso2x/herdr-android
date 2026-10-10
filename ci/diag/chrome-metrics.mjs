@@ -75,7 +75,7 @@ for (const profile of profiles) {
         await sleep(1000);
       }
       if (!last) { log(name, 'metrics', 'unavailable'); continue; }
-      for (const key of ['env', 'page', 'layout', 'xtermCount', 'xterms', 'anyXtermTall', 'anyXtermRows', 'chat', 'ws', 'diag']) log(name, key, last[key]);
+      for (const key of ['env', 'units', 'fixes', 'chain', 'appHeightVarComputed', 'page', 'layout', 'xtermCount', 'xterms', 'anyXtermTall', 'anyXtermRows', 'chat', 'ws', 'diag']) log(name, key, last[key]);
       log(name, 'verdict', `xterms=${last.xtermCount} anyTall=${last.anyXtermTall} anyRows=${last.anyXtermRows}`);
     } catch (error) {
       log(name, 'error', String(error && error.message).slice(0, 200));
