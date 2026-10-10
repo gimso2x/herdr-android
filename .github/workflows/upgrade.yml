@@ -1,0 +1,59 @@
+name: Upgrade check
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_tag:
+        description: 'Release tag of the APK to install first (e.g. v0.1.0-rc1)'
+        required: true
+      to_tag:
+        description: 'Release tag of the APK to update to (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Download both release APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FROM_TAG: ${{ inputs.from_tag }}
+          TO_TAG: ${{ inputs.to_tag }}
+        run: |
+          for t in "$FROM_TAG" "$TO_TAG"; do
+            [[ "$t" =~ ^v[0-9A-Za-z.-]+$ ]] || { echo "bad tag: $t" >&2; exit 1; }
+          done
+          mkdir -p "$RUNNER_TEMP/from" "$RUNNER_TEMP/to"
+          gh release download "$FROM_TAG" --repo "$GITHUB_REPOSITORY" -p app-release.apk -D "$RUNNER_TEMP/from" --clobber
+          gh release download "$TO_TAG" --repo "$GITHUB_REPOSITORY" -p app-release.apk -D "$RUNNER_TEMP/to" --clobber
+          sha256sum "$RUNNER_TEMP"/from/app-release.apk "$RUNNER_TEMP"/to/app-release.apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install PulseAudio for the emulator audio backend
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq pulseaudio
+      - name: Install from-APK, update in place to-APK
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -no-metrics
+          disk-size: 4096M
+          ram-size: 4096M
+          heap-size: 512M
+          pre-emulator-launch-script: pulseaudio --start --exit-idle-time=-1
+          disable-animations: true
+          script: ./ci/upgrade.sh ${{ runner.temp }}/from/app-release.apk ${{ runner.temp }}/to/app-release.apk
