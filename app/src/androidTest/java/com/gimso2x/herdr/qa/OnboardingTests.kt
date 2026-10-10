@@ -80,8 +80,13 @@ private object Ob {
             device.findObject(By.text(text))?.let { return it }
             device.findObject(By.scrollable(true))?.scroll(Direction.DOWN, 0.6f)
         }
-        val seen = device.findObjects(By.text(Pattern.compile(".+"))).map { it.text }
-        throw AssertionError("button '$text' not found on the onboarding screen; visible=$seen")
+        val out = java.io.ByteArrayOutputStream()
+        device.dumpWindowHierarchy(out)
+        val nodes = Regex("<node [^>]*>").findAll(out.toString()).map { node ->
+            fun attr(name: String) = Regex("$name=\"([^\"]*)\"").find(node.value)?.groupValues?.get(1).orEmpty()
+            "${attr("class").substringAfterLast('.')}|${attr("text")}|${attr("bounds")}|c=${attr("clickable")} e=${attr("enabled")}"
+        }.joinToString(" ;; ")
+        throw AssertionError("button '$text' not found on the onboarding screen; nodes=$nodes")
     }
 
     /** A control outside the scrolling list (the bottom bar). */
