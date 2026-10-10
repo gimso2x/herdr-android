@@ -82,7 +82,14 @@ private object Ob {
         val device = Qa.device
         assertNotNull("onboarding screen did not show", device.wait(Until.hasObject(By.text("처음 설정 안내")), 30_000))
 
+        // Compose does not always announce a scroll, so the client-side accessibility cache can keep the
+        // pre-scroll bounds (the screen is right, the tree is stale): always read a fresh tree.
+        fun fresh() {
+            if (android.os.Build.VERSION.SDK_INT >= 33) runCatching { Qa.instr.uiAutomation.clearCache() }
+        }
+
         fun shown(): UiObject2? = try {
+            fresh()
             val node = device.findObject(By.text(text))
             val area = device.findObject(By.scrollable(true))?.visibleBounds
             if (node == null || area == null) {
@@ -102,6 +109,7 @@ private object Ob {
         // trusted (it reported "cannot scroll" for a Compose list that could): progress is measured.
         // A node going stale means the screen was still changing: that counts as movement.
         fun layout(): String = runCatching {
+            fresh()
             device.findObjects(By.clazz("android.widget.TextView"))
                 .joinToString("|") { "${it.text}@${it.visibleBounds.top}" }
         }.getOrElse { "stale-${System.nanoTime()}" }
