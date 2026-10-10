@@ -203,19 +203,15 @@ group() {
       adb shell pm revoke "$PKG" android.permission.POST_NOTIFICATIONS
       run_phase W4PermissionOffTest
       adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS
-# The app holds a connection to Play services' fonts provider; when Play services dies on the
-# small runner the system kills every client of its providers, the app under test included.
-if adb root >/dev/null 2>&1 && adb wait-for-device && wait_until 30 is_root; then
-  adb shell pm disable com.google.android.gms/com.google.android.gms.fonts.provider.FontsProvider 2>&1 | sed 's/^/gms fonts provider: /'
-else
-  echo "note: could not become root to disable the gms fonts provider"
-fi
-adb unroot >/dev/null 2>&1 || true
-adb wait-for-device
-wait_until 30 adb shell true >/dev/null 2>&1 || true
 # Let the freshly booted system settle (Play services ANRs and dying providers would kill the app
 # under test) and make sure the soft keyboard service is up before any scenario types.
 timeout 120 adb shell am wait-for-broadcast-idle >/dev/null 2>&1 || echo "note: broadcast queues not idle after 120 s"
+# Installing the APKs sends DOMAINS_NEED_VERIFICATION to Play services, which then ANRs on the
+# 2-core runner minutes later; when it dies the system also kills every client of its providers,
+# the app under test included ("depends on provider ... FontsProvider in dying proc"). Restart it
+# now, while nothing is running, and let its queue drain.
+adb shell am force-stop com.google.android.gms >/dev/null 2>&1 || true
+timeout 120 adb shell am wait-for-broadcast-idle >/dev/null 2>&1 || echo "note: broadcast queues not idle after the Play services restart"
 ime_ready() { adb shell dumpsys input_method 2>/dev/null | grep -q 'mCurMethodId=.\+'; }
 wait_until 60 ime_ready || echo "note: no current input method reported"
       ;;
