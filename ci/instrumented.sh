@@ -20,6 +20,13 @@ DEVICE_TOKEN=/data/local/tmp/qa-token.json
 PHASE_TIMEOUT=480
 
 mkdir -p "$OUT"
+MEM_LOG="$(mktemp)"
+# Light host sampler (every 10 s, killed with the script): shows whether the host ran out of memory.
+( while true; do
+    echo "$(date +%T) $(free -m | awk 'NR==2{print "used=" $3 " avail=" $7}') qemuRSS=$(ps -o rss= -C qemu-system-x86_64 | tr '\n' ' ')"
+    sleep 10
+  done ) >"$MEM_LOG" 2>&1 &
+SAMPLER=$!
 FAILED=()
 RAN=()
 
@@ -31,6 +38,7 @@ purge_live_evidence() {
 }
 
 cleanup() {
+  kill "$SAMPLER" 2>/dev/null || true
   adb pull /sdcard/Download/qa/. "$OUT/" >/dev/null 2>&1 || true
   purge_live_evidence
   adb shell rm -f "$DEVICE_TOKEN" >/dev/null 2>&1 || true
@@ -100,6 +108,18 @@ hang_diagnostics() {
   echo "--- end hang diagnostics"
 }
 
+# Host-side facts for a vanished emulator (job log only: process names, sizes and kernel kill lines).
+emulator_death_facts() {
+  echo "--- emulator death facts"
+  echo "host memory samples (time used/avail MB, qemu RSS KB), last 12:"
+  tail -n 12 "$MEM_LOG" 2>/dev/null
+  free -m | sed -n 1,3p
+  { sudo -n dmesg 2>/dev/null || dmesg 2>/dev/null; } | grep -iE "out of memory|oom-kill|killed process|qemu|segfault|general protection" | tail -n 8 | cut -c1-200
+  ls -1 /tmp/android-runner 2>/dev/null | head -n 5
+  ls -1 "$HOME/.android" 2>/dev/null | grep -iE "crash|hs_err|emu-" | head -n 5
+  echo "--- end emulator death facts"
+}
+
 # One instrumentation phase: the output must contain `OK (`; the exit code alone proves nothing.
 run_phase() {
   local cls="$1" out="$OUT/$1.txt"
@@ -109,6 +129,7 @@ run_phase() {
   # say so once and stop instead.
   if [ "$(timeout 30 adb get-state 2>/dev/null | tr -d '\r\n')" != "device" ]; then
     echo "FATAL: the emulator is gone before phase $cls (adb get-state != device); qemu processes: $(pgrep -c -f qemu-system || true)"
+    emulator_death_facts
     FAILED+=("emulator lost before $cls")
     echo "=== QA SUMMARY: aborted"
     exit 1
