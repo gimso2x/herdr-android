@@ -19,7 +19,8 @@ if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
   echo "error: tag exists locally: $TAG" >&2
   exit 1
 fi
-if [ -n "$(git ls-remote --tags origin "$TAG")" ]; then
+remote_tags=$(git ls-remote --tags origin "refs/tags/$TAG") || { echo "error: cannot check remote tags" >&2; exit 1; }
+if [ -n "$remote_tags" ]; then
   echo "error: tag exists on origin: $TAG" >&2
   exit 1
 fi
