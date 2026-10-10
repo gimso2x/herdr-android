@@ -23,8 +23,16 @@ mkdir -p "$OUT"
 FAILED=()
 RAN=()
 
+# The repository is public and L1-L4 run against the owner's live herdr: their screenshots (l1.png,
+# L*-fail.png), logcat dumps and fact files can show workspace labels or pane titles, so they never
+# stay in $OUT (which is uploaded). The pixel gate and the plain phase outputs (L*.txt) stay.
+purge_live_evidence() {
+  rm -f "$OUT"/l1.png "$OUT"/L[1-4]*-fail.png "$OUT"/L[1-4]*Test-*.txt
+}
+
 cleanup() {
   adb pull /sdcard/Download/qa/. "$OUT/" >/dev/null 2>&1 || true
+  purge_live_evidence
   adb shell rm -f "$DEVICE_TOKEN" >/dev/null 2>&1 || true
   rm -f "$TOKEN_FILE"
 }

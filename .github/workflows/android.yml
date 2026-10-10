@@ -86,7 +86,7 @@ jobs:
           if-no-files-found: error
 
   instrumented:
-    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main')
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -177,6 +177,9 @@ jobs:
           echo "secret-scan files=$files apk=$apk"
           echo "$total"
           test "$total" -eq 0
+      - name: Drop live-server evidence (public repository)
+        if: always()
+        run: rm -f qa-screens/l1.png qa-screens/L[1-4]*-fail.png qa-screens/L[1-4]*Test-*.txt
       - name: Upload instrumented QA artifacts
         if: always()
         uses: actions/upload-artifact@v4

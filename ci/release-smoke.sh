@@ -6,8 +6,9 @@
 #
 # Env: CF_ID, CF_SECRET (CI Access service token), SMOKE_BAD_TOKEN=1 to type a wrong secret and
 # require the rejection text instead. Output files go to release-smoke/ (uploaded as an artifact):
-# only the screenshot of the herdr WebView, logcat and a summary. UI dumps contain the typed client
-# id, so they live in a temp dir that is never uploaded. No `set -x`; nothing secret is echoed.
+# only the summary (plain pass/fail notes), plus logcat in bad_token mode. The happy path talks to the
+# live herdr, so its screenshot and logcat stay on the runner and are never uploaded (the repository
+# is public). UI dumps contain the typed client id, so they live in a temp dir too. No `set -x`; nothing secret is echoed.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -29,7 +30,9 @@ note() { echo "$*" | tee -a "$SUMMARY"; }
 
 cleanup() {
   local rc=$?
-  adb logcat -d >"$OUT/logcat.txt" 2>&1 || true
+  if [ "$BAD" = "1" ]; then
+    adb logcat -d >"$OUT/logcat.txt" 2>&1 || true
+  fi
   if [ "$rc" -ne 0 ] && [ -s "$TMP/ui.xml" ]; then ui shape >"$OUT/ui-shape.txt" 2>&1 || true; fi
   adb shell pm clear "$PKG" >/dev/null 2>&1 || true
   adb shell rm -f "$DEV_DUMP" >/dev/null 2>&1 || true
@@ -243,12 +246,12 @@ ui has 'Sign in' && die "a login page is showing instead of herdr"
 note "web content nodes under WebView: $(ui webview)"
 resumed MainActivity || die "MainActivity no longer resumed"
 
-adb exec-out screencap -p >"$OUT/release-smoke.png" || die "screencap failed"
-png_bytes=$(stat -c %s "$OUT/release-smoke.png")
+adb exec-out screencap -p >"$TMP/release-smoke.png" || die "screencap failed"
+png_bytes=$(stat -c %s "$TMP/release-smoke.png")
 note "screenshot release-smoke.png bytes=$png_bytes"
 # The emulator screen is only 320x640 and the dark UI compresses well: a real herdr screenshot is ~14 KB.
 [ "$png_bytes" -gt 5000 ] || die "screenshot is suspiciously small"
-[ "$(head -c 4 "$OUT/release-smoke.png" | tail -c 3)" = "PNG" ] || die "screenshot is not a PNG"
+[ "$(head -c 4 "$TMP/release-smoke.png" | tail -c 3)" = "PNG" ] || die "screenshot is not a PNG"
 
 adb shell pidof "$PKG" >/dev/null || die "app process is not alive"
 fatal=$(adb logcat -d | grep -c -E 'FATAL EXCEPTION|AndroidRuntime: Process: com.gimso2x.herdr' || true)

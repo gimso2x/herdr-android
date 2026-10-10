@@ -67,7 +67,7 @@ class L1LiveLoadTest {
                 60_000,
                 "document.body.innerText.toLowerCase().indexOf($quoted) >= 0",
             ) {
-                "title=${Qa.jsString("document.title")} bodyChars=${Qa.js("document.body.innerText.length")} " +
+                "titleIsHerdr=${Qa.js(TITLE_IS_HERDR)} bodyChars=${Qa.js("document.body.innerText.length")} " +
                     "inText=${Qa.js("document.body.textContent.toLowerCase().indexOf($quoted) >= 0")}"
             }
             assertEquals(0L, (Qa.js("window.__qaBlocked") as Number).toLong())
