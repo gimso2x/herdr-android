@@ -77,8 +77,11 @@ private object Ob {
         val device = Qa.device
         assertNotNull("onboarding screen did not show", device.wait(Until.hasObject(By.text("처음 설정 안내")), 30_000))
         repeat(12) {
-            device.findObject(By.text(text))?.let { return it }
-            device.findObject(By.scrollable(true))?.scroll(Direction.DOWN, 0.6f)
+            // Only a fully drawn text counts: mid-fling snapshots list half-clipped nodes.
+            device.findObject(By.text(text))?.takeIf { it.visibleBounds.height() >= 14 }?.let { return it }
+            // Slow drag (no fling), then let the list and its accessibility tree settle.
+            device.findObject(By.scrollable(true))?.scroll(Direction.DOWN, 0.4f, 400)
+            device.waitForIdle(2_000)
         }
         val out = java.io.ByteArrayOutputStream()
         device.dumpWindowHierarchy(out)
@@ -98,7 +101,8 @@ private object Ob {
 
     fun toTop() {
         val area = Qa.device.findObject(By.scrollable(true)) ?: return
-        repeat(6) { area.scroll(Direction.UP, 1.0f) }
+        repeat(6) { area.scroll(Direction.UP, 1.0f, 800) }
+        Qa.device.waitForIdle(2_000)
     }
 
     fun awaitActivity(simpleName: String) {
