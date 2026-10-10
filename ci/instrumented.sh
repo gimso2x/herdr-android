@@ -113,7 +113,10 @@ is_root() { [ "$(adb shell id -u 2>/dev/null | tr -d '\r\n')" = "0" ]; }
 # Force-stop, become root (only root may send the protected BOOT_COMPLETED), broadcast to the stopped app.
 boot_broadcast() {
   adb shell am force-stop "$PKG"
-  if ! adb root >"$OUT/adb-root.txt" 2>&1; then
+  adb wait-for-device
+  # adbd restarts on every root/unroot: "unable to connect for root: closed" means it is not back yet.
+  root_ok() { adb root >"$OUT/adb-root.txt" 2>&1; }
+  if ! wait_until 45 root_ok; then
     fail "adb root failed: $(tr '\n' ' ' <"$OUT/adb-root.txt")"
     return 1
   fi
