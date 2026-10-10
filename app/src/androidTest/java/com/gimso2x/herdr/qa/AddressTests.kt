@@ -61,9 +61,13 @@ class U1UpgradePathTest {
                 assertEquals("the token must be kept", Qa.syntheticToken(), Qa.app.tokenStore.get())
                 assertEquals("nothing may be contacted before the address is entered", 0, fx.log.size)
 
-                // An invalid address keeps "연결" disabled.
+                // An invalid address is reported on the field and nothing is contacted.
                 fields!![0].text = "http://insecure.example.com"
-                assertNotNull(Qa.device.wait(Until.findObject(By.text("연결").enabled(false)), 15_000))
+                assertNotNull(
+                    "invalid-address message not shown",
+                    Qa.device.wait(Until.findObject(By.textContains("https://로 시작하는")), 15_000),
+                )
+                assertEquals(0, fx.log.size)
 
                 // The fixture address (debug builds accept loopback) completes it with the stored token.
                 fields[0].text = fx.base
@@ -109,8 +113,11 @@ class U2SettingsChangeTest {
                 Qa.until(60_000, "new address stored", { "health=${b.healthRequests()}" }) {
                     Qa.app.tokenStore.getServer() == b.base && b.healthRequests() >= 1
                 }
+                // Cookies are per host, not per port: both fixtures share 127.0.0.1, so the old marker
+                // value must be gone and the value the new server issued must be present.
                 Qa.until(30_000, "old cookie wiped, new one installed") {
-                    Qa.cookieFor(a.base) == null && Qa.cookieFor(b.base)?.contains("CF_Authorization=") == true
+                    val cookie = Qa.cookieFor(b.base).orEmpty()
+                    !cookie.contains("CF_Authorization=old") && b.issued.any { cookie.contains(it) }
                 }
                 assertEquals(0, a.healthRequests())
                 assertEquals(b.base, HerdrConfig.baseUrl)

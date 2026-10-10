@@ -92,18 +92,28 @@ private object Ob {
 
         shown()?.let { return it }
         toTop()
+        // The list moved if any text changed its position. UiObject2.scroll()'s return value is not
+        // trusted (it reported "cannot scroll" for a Compose list that could): progress is measured.
+        fun layout(): String = device.findObjects(By.clazz("android.widget.TextView"))
+            .joinToString("|") { "${it.text}@${it.visibleBounds.top}" }
+        var stalled = 0
         var steps = 0
-        while (steps++ < 40) {
+        while (steps++ < 40 && stalled < 3) {
             shown()?.let { return it }
             val area = device.findObject(By.scrollable(true)) ?: break
-            // Slow drag (no fling); false means the end of the list was reached.
-            val more = area.scroll(Direction.DOWN, 0.3f, 400)
+            val before = layout()
+            // Slow drag (no fling) first; when it did not move the list, an explicit finger swipe.
+            area.scroll(Direction.DOWN, 0.3f, 400)
             device.waitForIdle(2_000)
-            if (!more) {
-                shown()?.let { return it }
-                break
+            if (layout() == before) {
+                val bounds = area.visibleBounds
+                val x = bounds.centerX()
+                device.swipe(x, bounds.bottom - bounds.height() / 5, x, bounds.top + bounds.height() / 5, 80)
+                device.waitForIdle(2_000)
             }
+            if (layout() == before) stalled++ else stalled = 0
         }
+        shown()?.let { return it }
         val out = java.io.ByteArrayOutputStream()
         device.dumpWindowHierarchy(out)
         val nodes = Regex("<node [^>]*>").findAll(out.toString()).map { node ->
