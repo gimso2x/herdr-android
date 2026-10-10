@@ -6,8 +6,11 @@ import java.io.IOException
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -53,11 +56,14 @@ class WatchPoller(
             .header("Cookie", cookieHeader)
             .build()
         return try {
-            // The call is cancelled with the coroutine; a response that still arrives is dropped.
-            client.newCall(request).await().use { response ->
+            // The call is cancelled with the coroutine, including while the body is being read.
+            val call = client.newCall(request)
+            call.await().use { response ->
                 val context = currentCoroutineContext()
                 context.ensureActive()
-                handle(seq, response.code, response, context)
+                val body = if (response.code == 200) call.readBody(response) else null
+                context.ensureActive()
+                handle(seq, response.code, body, context)
             }
         } catch (_: IOException) {
             PollResult(seq, PollOutcome.NETWORK)
@@ -78,9 +84,23 @@ class WatchPoller(
         })
     }
 
-    private fun handle(seq: Long, code: Int, response: Response, context: CoroutineContext): PollResult = when (code) {
+    /**
+     * Reads the body off-thread so a stop while the read is blocked cancels the [Call] (closing the
+     * socket unblocks the read) instead of leaving it alive until the body or timeouts complete.
+     */
+    private suspend fun Call.readBody(response: Response): String = coroutineScope {
+        val reader = async(Dispatchers.IO) { response.body?.string().orEmpty() }
+        try {
+            reader.await()
+        } catch (e: CancellationException) {
+            cancel()
+            throw e
+        }
+    }
+
+    private fun handle(seq: Long, code: Int, body: String?, context: CoroutineContext): PollResult = when (code) {
         200 -> {
-            val samples = SnapshotParser.parse(response.body?.string().orEmpty())
+            val samples = SnapshotParser.parse(body.orEmpty())
             if (samples == null) {
                 PollResult(seq, PollOutcome.PARSE_ERROR)
             } else {
