@@ -48,7 +48,7 @@ failure_facts() {
   log=$(adb logcat -d 2>/dev/null) || true
   echo "--- failure facts"
   grep -o -E 'ResumedActivity: ActivityRecord\{[^ ]+ u0 [^ ]+' <<<"$acts" | sed -E 's/.* u0 //' | sed -n 1p
-  echo "uiautomator dump says: $(adb shell uiautomator dump "$DEV_DUMP" 2>&1 | tr -d '\r' | cut -c1-120)"
+  echo "uiautomator dump says: $(timeout 30 adb shell uiautomator dump "$DEV_DUMP" 2>&1 | tr -d "\r" | cut -c1-120)"
   grep -o -E 'net::ERR_[A-Z_]+|FATAL EXCEPTION|ANR in [A-Za-z.]+|Choreographer: Skipped [0-9]+ frames' <<<"$log" | sort | uniq -c
   adb exec-out screencap -p >"$TMP/fail.png" 2>/dev/null && python3 ci/pane_metrics.py --screen "$TMP/fail.png" || true
   dumpui && echo "a11y nodes in the dump: $(grep -o '<node ' "$TMP/ui.xml" | wc -l)"
@@ -59,7 +59,7 @@ die() { note "FAIL: $*"; failure_facts; exit 1; }
 
 # --- uiautomator dump queries (python only parses the XML; values are never printed) ----------
 dumpui() {
-  adb shell uiautomator dump "$DEV_DUMP" >/dev/null 2>&1 && adb pull "$DEV_DUMP" "$TMP/ui.xml" >/dev/null 2>&1
+  timeout 30 adb shell uiautomator dump "$DEV_DUMP" >/dev/null 2>&1 && adb pull "$DEV_DUMP" "$TMP/ui.xml" >/dev/null 2>&1
 }
 
 ui() { # <mode> [arg]
