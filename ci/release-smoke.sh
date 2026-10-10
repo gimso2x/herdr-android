@@ -4,7 +4,7 @@
 #
 #   ci/release-smoke.sh <app-release.apk>
 #
-# Env: CF_ID, CF_SECRET (CI Access service token), SMOKE_BAD_TOKEN=1 to type a wrong secret and
+# Env: BASE_URL (the server address, typed into the setup field), CF_ID, CF_SECRET (CI Access service token), SMOKE_BAD_TOKEN=1 to type a wrong secret and
 # require the rejection text instead. Output files go to release-smoke/ (uploaded as an artifact):
 # only the summary (plain pass/fail notes), plus logcat in bad_token mode. The happy path talks to the
 # live herdr, so its screenshot and logcat stay on the runner and are never uploaded (the repository
@@ -16,6 +16,7 @@ APK="${1:?usage: ci/release-smoke.sh <app-release.apk>}"
 PKG=com.gimso2x.herdr
 OUT=release-smoke
 BAD="${SMOKE_BAD_TOKEN:-0}"
+BASE_URL="${BASE_URL:-}"
 CF_ID="${CF_ID:-}"
 CF_SECRET="${CF_SECRET:-}"
 WRONG_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
@@ -154,7 +155,7 @@ PY
   adb shell "$cmd" >/dev/null 2>&1
 }
 
-edit_count() { dumpui && [ "$(ui edits | wc -l)" -ge 2 ]; }
+edit_count() { dumpui && [ "$(ui edits | wc -l)" -ge 3 ]; }
 
 # Tap the Nth (1-based) EditText of a fresh dump, type the value, return the length the field shows.
 fill_field() { # <index> <env var name> <expected length>
@@ -173,6 +174,8 @@ fill_field() { # <index> <env var name> <expected length>
 
 # --- preconditions ----------------------------------------------------------------------------
 [ -s "$APK" ] || die "apk not found"
+[ -n "$BASE_URL" ] || die "BASE_URL is missing"
+[[ "$BASE_URL" =~ ^https://[^/[:space:]]+$ ]] || die "BASE_URL is not an https origin"
 [ -n "$CF_ID" ] || die "CF_ID is missing"
 if [ "$BAD" = "1" ]; then
   SECRET_VALUE="$WRONG_SECRET"
@@ -181,7 +184,7 @@ else
   SECRET_VALUE="$CF_SECRET"
 fi
 ID_VALUE="$CF_ID"
-note "mode=$([ "$BAD" = "1" ] && echo bad_token || echo happy) id_len=${#ID_VALUE} secret_len=${#SECRET_VALUE}"
+note "mode=$([ "$BAD" = "1" ] && echo bad_token || echo happy) address_len=${#BASE_URL} id_len=${#ID_VALUE} secret_len=${#SECRET_VALUE}"
 
 # --- install + prepare ------------------------------------------------------------------------
 adb shell input keyevent KEYCODE_WAKEUP
@@ -205,13 +208,14 @@ adb shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1 || die "am start f
 # --- setup screen -----------------------------------------------------------------------------
 setup_up() { dumpui && ui node '연결' >/dev/null; }
 wait_for 30 'setup screen button "연결"' setup_up || die "setup screen did not appear"
-wait_for 10 'two setup fields' edit_count || die "setup fields not found"
+wait_for 10 'three setup fields' edit_count || die "setup fields not found"
 resumed SetupActivity || die "SetupActivity is not the resumed activity"
 note "setup screen shown (SetupActivity resumed)"
 
-fill_field 1 ID_VALUE "${#ID_VALUE}" || die "client id field does not hold the typed value (length mismatch)"
-fill_field 2 SECRET_VALUE "${#SECRET_VALUE}" || die "client secret field does not hold the typed value (length mismatch)"
-note "both fields filled (lengths verified from the dump)"
+fill_field 1 BASE_URL "${#BASE_URL}" || die "server address field does not hold the typed value (length mismatch)"
+fill_field 2 ID_VALUE "${#ID_VALUE}" || die "client id field does not hold the typed value (length mismatch)"
+fill_field 3 SECRET_VALUE "${#SECRET_VALUE}" || die "client secret field does not hold the typed value (length mismatch)"
+note "address, client id and secret typed (lengths verified from the dump, values never printed)"
 
 # Close the soft keyboard (BACK only closes the IME while it is shown) so the button is reachable.
 ime_out=$(adb shell dumpsys input_method 2>/dev/null | tr -d '\r')

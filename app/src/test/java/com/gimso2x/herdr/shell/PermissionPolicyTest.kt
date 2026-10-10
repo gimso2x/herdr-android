@@ -23,7 +23,7 @@ class PermissionPolicyTest {
     fun micForBaseOriginAfterRuntimeGrantIsGranted() {
         assertEquals(PermissionDecision.Grant(mic), decide("https://herdr.example.com/", mic, true))
         assertEquals(PermissionDecision.Grant(mic), decide("https://herdr.example.com", mic, true))
-        assertEquals(PermissionDecision.Grant(mic), decide("HTTPS://Herdr.Example.com:443/x", mic, true))
+        assertEquals(PermissionDecision.Grant(mic), decide("HTTPS://Herdr.example.com:443/x", mic, true))
     }
 
     @Test
@@ -61,7 +61,7 @@ class PermissionPolicyTest {
             "https://evil.example/",
             "https://herdr.example.com.evil.example/",
             "https://evilherdr.example.com/",
-            "https://your-team.cloudflareaccess.com/",
+            "https://team.cloudflareaccess.com/",
             "http://herdr.example.com/",
             "https://herdr.example.com:8443/",
             "https://user@herdr.example.com/",

@@ -4,7 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class PopupPolicyTest {
-    private val policy = UrlPolicy()
+    private val policy = UrlPolicy("https://herdr.example.com")
 
     @Test
     fun herdrTargetLoadsInMainWebView() {
@@ -36,7 +36,7 @@ class PopupPolicyTest {
     fun accessRedirectFromPopupIsIgnored() {
         assertEquals(
             PopupAction.Ignore,
-            PopupPolicy.route("https://your-team.cloudflareaccess.com/cdn-cgi/access/login", policy),
+            PopupPolicy.route("https://team.cloudflareaccess.com/cdn-cgi/access/login", policy),
         )
     }
 
@@ -48,8 +48,8 @@ class PopupPolicyTest {
     }
 
     @Test
-    fun debugFixtureOriginFollowsUrlPolicy() {
-        val debug = UrlPolicy(debugOrigin = "http://127.0.0.1:41234")
+    fun fixtureBaseFollowsUrlPolicy() {
+        val debug = UrlPolicy("http://127.0.0.1:41234")
         assertEquals(
             PopupAction.LoadInApp("http://127.0.0.1:41234/x"),
             PopupPolicy.route("http://127.0.0.1:41234/x", debug),

@@ -1,5 +1,6 @@
 package com.gimso2x.herdr.shell
 
+import com.gimso2x.herdr.access.ServerAddress
 import java.net.URI
 import java.net.URLEncoder
 import java.util.Locale
@@ -22,15 +23,16 @@ sealed interface UrlDecision {
 /**
  * Pure navigation policy (no Android types, so it is JVM-testable).
  *
- * In-app means an exact scheme + host + port match with the herdr origin (or, in debug builds
- * only, the fixture origin passed as [debugOrigin]). Anything that does not parse cleanly, carries
- * userinfo, or has a look-alike host is never in-app.
+ * In-app means an exact scheme + host + port match with the configured server origin ([baseUrl] is
+ * read on every decision, so a changed address takes effect at once; nothing is in-app while none is
+ * configured). Anything that does not parse cleanly, carries userinfo, or has a look-alike host is
+ * never in-app. A main-frame navigation to any `*.cloudflareaccess.com` host is a login redirect
+ * (the session expired): [UrlDecision.RefreshSession].
  */
-class UrlPolicy(debugOrigin: String? = null) {
-    private val inAppOrigins: Set<Origin> = buildSet {
-        add(HERDR_ORIGIN)
-        debugOrigin?.let { originOf(it) }?.let { add(it) }
-    }
+class UrlPolicy(private val baseUrl: () -> String?) {
+    constructor(baseUrl: String?) : this({ baseUrl })
+
+    private fun baseOrigin(): Origin? = baseUrl()?.let { originOf(it) }
 
     fun decide(url: String, isMainFrame: Boolean): UrlDecision {
         val uri = parse(url) ?: return UrlDecision.Block
@@ -51,9 +53,9 @@ class UrlPolicy(debugOrigin: String? = null) {
     private fun decideWeb(url: String, uri: URI, scheme: String, isMainFrame: Boolean): UrlDecision {
         val origin = originOf(uri, scheme) ?: return UrlDecision.Block
         if (uri.rawUserInfo != null) return if (isMainFrame) UrlDecision.External(url) else UrlDecision.Block
-        if (origin in inAppOrigins) return UrlDecision.InApp
+        if (origin == baseOrigin()) return UrlDecision.InApp
         if (!isMainFrame) return UrlDecision.Block
-        if (origin == ACCESS_ORIGIN) return UrlDecision.RefreshSession
+        if (isAccess(origin)) return UrlDecision.RefreshSession
         return UrlDecision.External(url)
     }
 
@@ -64,16 +66,14 @@ class UrlPolicy(debugOrigin: String? = null) {
         if (innerScheme != "http" && innerScheme != "https") return UrlDecision.Block
         if (inner.rawUserInfo != null) return UrlDecision.Block
         val origin = originOf(inner, innerScheme) ?: return UrlDecision.Block
-        return if (origin in inAppOrigins) UrlDecision.InApp else UrlDecision.Block
+        return if (origin == baseOrigin()) UrlDecision.InApp else UrlDecision.Block
     }
 
     internal data class Origin(val scheme: String, val host: String, val port: Int)
 
     companion object {
-        const val HERDR_HOST = "herdr.example.com"
-        const val ACCESS_HOST = "your-team.cloudflareaccess.com"
-        private val HERDR_ORIGIN = Origin("https", HERDR_HOST, 443)
-        private val ACCESS_ORIGIN = Origin("https", ACCESS_HOST, 443)
+        private fun isAccess(origin: Origin): Boolean =
+            origin.scheme == "https" && origin.port == 443 && ServerAddress.isAccessHost(origin.host)
 
         private fun parse(url: String): URI? = try {
             URI(url)

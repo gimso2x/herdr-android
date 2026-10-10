@@ -7,8 +7,9 @@
 import fs from 'node:fs';
 import puppeteer from 'puppeteer-core';
 
-const BASE = 'https://herdr.example.com';
-const HOST = 'herdr.example.com';
+const BASE = (process.env.BASE_URL || '').replace(/\/+$/, '');
+if (!/^https:\/\/[^/\s]+$/.test(BASE)) throw new Error('BASE_URL must be an https origin');
+const HOST = new URL(BASE).hostname;
 const probe = fs.readFileSync('app/src/debug/assets/diag_probe.js', 'utf8');
 const metricsSource = fs.readFileSync('app/src/debug/assets/diag_metrics.js', 'utf8');
 const cookie = fs.readFileSync(process.env.CF_COOKIE_FILE, 'utf8').trim();

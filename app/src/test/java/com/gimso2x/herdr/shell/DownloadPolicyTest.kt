@@ -41,7 +41,7 @@ class DownloadPolicyTest {
         assertEquals(DownloadDecision.External(url), decide(url, null, "application/zip"))
         val lookalike = "https://herdr.example.com.evil.example/f"
         assertEquals(DownloadDecision.External(lookalike), decide(lookalike))
-        val access = "https://your-team.cloudflareaccess.com/f"
+        val access = "https://team.cloudflareaccess.com/f"
         assertEquals(DownloadDecision.External(access), decide(access))
         val userinfo = "https://herdr.example.com@evil.example/f"
         assertEquals(DownloadDecision.External(userinfo), decide(userinfo))

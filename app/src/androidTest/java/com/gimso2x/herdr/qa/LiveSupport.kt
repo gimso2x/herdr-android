@@ -28,6 +28,20 @@ object LiveSupport {
         return ServiceToken(id, secret)
     }
 
+    /**
+     * The live server origin from the same file (`baseUrl`, https only). The address is a CI secret:
+     * it is never echoed, a missing or invalid value is a hard failure.
+     */
+    fun baseUrl(): String {
+        val json = try {
+            JSONObject(Qa.shell("cat $TOKEN_FILE"))
+        } catch (_: Exception) {
+            throw AssertionError("qa-token.json is missing or not JSON")
+        }
+        return com.gimso2x.herdr.access.ServerAddress.parse(json.optString("baseUrl"))
+            ?: throw AssertionError("qa-token.json lacks a valid https baseUrl")
+    }
+
     private val client = OkHttpClient.Builder()
         .followRedirects(false)
         .callTimeout(30, TimeUnit.SECONDS)

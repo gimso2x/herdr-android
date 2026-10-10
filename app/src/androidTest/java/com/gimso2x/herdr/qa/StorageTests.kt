@@ -57,15 +57,15 @@ class SCookieWipeTest {
     fun clearTokenWipesTheCookie() {
         Qa.resetState(alerts = false, token = Qa.syntheticToken())
         Qa.onMain {
-            CookieManager.getInstance().setCookie(Qa.LIVE, "CF_Authorization=qa-fixture-cookie; Path=/; Secure; HttpOnly")
+            CookieManager.getInstance().setCookie(Qa.SAMPLE, "CF_Authorization=qa-fixture-cookie; Path=/; Secure; HttpOnly")
             CookieManager.getInstance().flush()
         }
-        assertNotNull("fixture cookie was not installed", Qa.cookieFor(Qa.LIVE))
+        assertNotNull("fixture cookie was not installed", Qa.cookieFor(Qa.SAMPLE))
         ActivityScenario.launch(SettingsActivity::class.java).use {
             val clear = Qa.device.wait(Until.findObject(By.text("토큰 지우기").enabled(true)), 30_000)
             assertNotNull("clear-token button not available", clear)
             clear.click()
-            Qa.until(20_000, "cookie wiped") { Qa.cookieFor(Qa.LIVE) == null }
+            Qa.until(20_000, "cookie wiped") { Qa.cookieFor(Qa.SAMPLE) == null }
             Qa.until(20_000, "token wiped") { Qa.app.tokenStore.get() == null }
         }
     }

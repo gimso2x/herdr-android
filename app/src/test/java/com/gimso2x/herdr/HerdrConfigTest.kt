@@ -2,37 +2,72 @@ package com.gimso2x.herdr
 
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 class HerdrConfigTest {
+    @Before
+    fun clean() {
+        HerdrConfig.applyOverride(null, true)
+        HerdrConfig.install { null }
+    }
+
     @After
     fun resetOverride() {
         HerdrConfig.applyOverride(null, true)
+        HerdrConfig.install { null }
     }
 
     @Test
-    fun baseUrlIsHerdrOrigin() {
-        assertEquals("https://herdr.example.com", HerdrConfig.BASE_URL)
+    fun nothingIsConfiguredByDefault() {
+        assertNull(HerdrConfig.baseUrlOrNull)
+        assertEquals("", HerdrConfig.baseUrl)
+        assertFalse(HerdrConfig.isConfigured)
     }
 
     @Test
-    fun baseUrlDefaultsToConstant() {
-        assertEquals(HerdrConfig.BASE_URL, HerdrConfig.baseUrl)
+    fun storedAddressIsReadOnceFromTheLoader() {
+        var reads = 0
+        HerdrConfig.install {
+            reads++
+            "https://herdr.example.com"
+        }
+        assertEquals("https://herdr.example.com", HerdrConfig.baseUrl)
+        assertEquals("https://herdr.example.com", HerdrConfig.baseUrlOrNull)
+        assertTrue(HerdrConfig.isConfigured)
+        assertEquals(1, reads)
     }
 
     @Test
-    fun debugBuildAppliesAndClearsOverride() {
+    fun setServerAddressReplacesAndForgets() {
+        HerdrConfig.install { "https://old.example.com" }
+        HerdrConfig.setServerAddress("https://new.example.com")
+        assertEquals("https://new.example.com", HerdrConfig.baseUrl)
+        HerdrConfig.setServerAddress(null)
+        assertNull(HerdrConfig.baseUrlOrNull)
+        assertFalse(HerdrConfig.isConfigured)
+    }
+
+    @Test
+    fun debugBuildOverrideWinsOverTheStoredAddress() {
+        HerdrConfig.install { "https://herdr.example.com" }
         HerdrConfig.applyOverride("http://127.0.0.1:4321/", true)
         assertEquals("http://127.0.0.1:4321", HerdrConfig.baseUrl)
+        assertTrue(HerdrConfig.hasDebugOverride)
         HerdrConfig.applyOverride(null, true)
-        assertEquals(HerdrConfig.BASE_URL, HerdrConfig.baseUrl)
+        assertEquals("https://herdr.example.com", HerdrConfig.baseUrl)
+        assertFalse(HerdrConfig.hasDebugOverride)
     }
 
     @Test
     fun releaseBuildIgnoresOverride() {
         HerdrConfig.applyOverride("http://127.0.0.1:4321", false)
-        assertEquals(HerdrConfig.BASE_URL, HerdrConfig.baseUrl)
+        assertNull(HerdrConfig.baseUrlOrNull)
+        assertFalse(HerdrConfig.hasDebugOverride)
     }
 
     @Test
@@ -40,7 +75,7 @@ class HerdrConfigTest {
         assertThrows(IllegalArgumentException::class.java) {
             HerdrConfig.applyOverride("file:///etc/passwd", true)
         }
-        assertEquals(HerdrConfig.BASE_URL, HerdrConfig.baseUrl)
+        assertNull(HerdrConfig.baseUrlOrNull)
     }
 
     @Test
@@ -75,7 +110,7 @@ class HerdrConfigTest {
             assertThrows(url, IllegalArgumentException::class.java) {
                 HerdrConfig.applyOverride(url, true)
             }
-            assertEquals(url, HerdrConfig.BASE_URL, HerdrConfig.baseUrl)
+            assertNull(url, HerdrConfig.baseUrlOrNull)
         }
     }
 }

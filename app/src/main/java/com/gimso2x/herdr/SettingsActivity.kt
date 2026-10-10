@@ -41,6 +41,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.text.input.KeyboardType
+import com.gimso2x.herdr.access.ServerAddress
+import com.gimso2x.herdr.access.clearAllCookies
+import com.gimso2x.herdr.shell.RefreshOutcome
+import com.gimso2x.herdr.ui.SetupError
 import com.gimso2x.herdr.ui.HerdrTheme
 import com.gimso2x.herdr.ui.SetupLogic
 import com.gimso2x.herdr.watch.WatcherController
@@ -65,6 +72,7 @@ class SettingsActivity : ComponentActivity() {
                     model = model,
                     onBack = { finish() },
                     onReplaceToken = { startActivity(SetupActivity.intent(this)) },
+                    onServerChangeFailed = { startActivity(SetupActivity.intent(this, it, addressOnly = true)) },
                     onOpenNotificationSettings = {
                         startActivity(
                             Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
@@ -105,6 +113,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             val token = withContext(Dispatchers.IO) { app.tokenStore.get() }
             maskedClientId = token?.let { SetupLogic.maskClientId(it.clientId) }
+            server = withContext(Dispatchers.IO) { HerdrConfig.baseUrlOrNull }
         }
     }
 
@@ -123,6 +132,56 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             maskedClientId = null
         }
     }
+
+    /** Stored server address shown in the settings, or null when none. */
+    var server by mutableStateOf<String?>(null)
+        private set
+    var serverInput by mutableStateOf("")
+        private set
+    var serverBusy by mutableStateOf(false)
+        private set
+
+    private fun normalizedInput(): String? = SetupLogic.address(serverInput, allowLoopback = BuildConfig.DEBUG)
+
+    val serverInputInvalid: Boolean
+        get() = serverInput.isNotBlank() && normalizedInput() == null
+
+    val canChangeServer: Boolean
+        get() = !serverBusy && normalizedInput().let { it != null && it != server }
+
+    fun onServerInput(value: String) {
+        if (value.length <= ServerAddress.MAX_LENGTH + 16) serverInput = value
+    }
+
+    /**
+     * Stores the new address, wipes the cookies of the old one and bootstraps again against the new
+     * one; anything but a fresh cookie sends the user to the setup screen (address only) with the reason.
+     */
+    fun changeServer(onFailed: (SetupError) -> Unit) {
+        val address = normalizedInput() ?: return
+        if (serverBusy) return
+        serverBusy = true
+        viewModelScope.launch {
+            val stored = withContext(Dispatchers.IO) { app.tokenStore.putServer(address) }
+            if (!stored) {
+                serverBusy = false
+                onFailed(SetupError.STORE_FAILED)
+                return@launch
+            }
+            WatcherController.stop(app)
+            clearAllCookies()
+            HerdrConfig.setServerAddress(address)
+            val outcome = RefreshOutcome.of(app.accessSession.ensureFresh(force = true))
+            server = address
+            serverInput = ""
+            serverBusy = false
+            if (outcome is RefreshOutcome.Fresh) {
+                WatcherController.start(app)
+            } else {
+                onFailed(if (outcome is RefreshOutcome.NeedsSetup) outcome.error else SetupError.NETWORK)
+            }
+        }
+    }
 }
 
 @Composable
@@ -130,6 +189,7 @@ private fun SettingsScreen(
     model: SettingsViewModel,
     onBack: () -> Unit,
     onReplaceToken: () -> Unit,
+    onServerChangeFailed: (SetupError) -> Unit,
     onOpenNotificationSettings: () -> Unit,
     onOpenBattery: () -> Unit,
     onOpenAutoRevoke: () -> Unit,
@@ -162,6 +222,37 @@ private fun SettingsScreen(
                 OutlinedButton(onClick = model::clearToken, enabled = model.maskedClientId != null) {
                     Text(stringResource(R.string.settings_token_clear))
                 }
+            }
+
+            HorizontalDivider()
+
+            Text(stringResource(R.string.settings_server), style = MaterialTheme.typography.titleMedium)
+            Text(
+                model.server ?: stringResource(R.string.settings_server_none),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = model.serverInput,
+                onValueChange = model::onServerInput,
+                label = { Text(stringResource(R.string.setup_server_address)) },
+                placeholder = { Text(stringResource(R.string.setup_server_placeholder)) },
+                singleLine = true,
+                enabled = !model.serverBusy,
+                isError = model.serverInputInvalid,
+                supportingText = if (model.serverInputInvalid) {
+                    { Text(stringResource(R.string.setup_server_invalid)) }
+                } else {
+                    null
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(
+                onClick = { model.changeServer(onServerChangeFailed) },
+                enabled = model.canChangeServer,
+            ) {
+                Text(stringResource(if (model.serverBusy) R.string.settings_server_changing else R.string.settings_server_change))
             }
 
             HorizontalDivider()

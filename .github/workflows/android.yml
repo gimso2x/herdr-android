@@ -134,10 +134,11 @@ jobs:
         env:
           CF_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_CI }}
           CF_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET_CI }}
+          BASE_URL: ${{ secrets.HERDR_BASE_URL }}
         run: |
-          test -n "$CF_ID" && test -n "$CF_SECRET" || { echo 'CI token secrets are missing' >&2; exit 1; }
+          test -n "$CF_ID" && test -n "$CF_SECRET" && test -n "$BASE_URL" || { echo 'CI token/base-url secrets are missing' >&2; exit 1; }
           umask 077
-          jq -n '{id: env.CF_ID, secret: env.CF_SECRET, liveQa: true}' > "$RUNNER_TEMP/qa-token.json"
+          jq -n '{id: env.CF_ID, secret: env.CF_SECRET, baseUrl: env.BASE_URL, liveQa: true}' > "$RUNNER_TEMP/qa-token.json"
       - name: Instrumented QA on the emulator
         uses: reactivecircus/android-emulator-runner@v2
         env:
@@ -163,13 +164,16 @@ jobs:
         env:
           CF_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_CI }}
           CF_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET_CI }}
+          BASE_URL: ${{ secrets.HERDR_BASE_URL }}
         run: |
-          test -n "$CF_ID" && test -n "$CF_SECRET" || { echo 'scan secrets are missing' >&2; exit 1; }
-          files=$( { grep -r -l -F -e "$CF_SECRET" -e "$CF_ID" app/build/reports app/build/outputs qa-screens 2>/dev/null || true; } | wc -l)
+          test -n "$CF_ID" && test -n "$CF_SECRET" && test -n "$BASE_URL" || { echo 'scan secrets are missing' >&2; exit 1; }
+          BASE_HOST=${BASE_URL#https://}
+          BASE_HOST=${BASE_HOST%%/*}
+          files=$( { grep -r -l -F -e "$CF_SECRET" -e "$CF_ID" -e "$BASE_HOST" app/build/reports app/build/outputs qa-screens 2>/dev/null || true; } | wc -l)
           apk=0
           for a in app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk; do
             if [ -f "$a" ]; then
-              n=$(unzip -p "$a" | grep -c -F -e "$CF_SECRET" -e "$CF_ID" || true)
+              n=$(unzip -p "$a" | grep -c -F -e "$CF_SECRET" -e "$CF_ID" -e "$BASE_HOST" || true)
               apk=$((apk + n))
             fi
           done

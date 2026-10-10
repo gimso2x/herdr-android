@@ -18,7 +18,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-// Live scenarios: base = https://herdr.example.com with LiveQaGuard on. They only render and GET;
+// Live scenarios: base = the CI secret address (qa-token.json `baseUrl`) with LiveQaGuard on. They only render and GET;
 // the guard drops input/resize/... frames, rewrites the WebSocket role to observe and rejects any
 // non-GET/HEAD request (L1 asserts nothing was blocked).
 
@@ -38,7 +38,7 @@ private const val TITLE_IS_HERDR =
 
 private fun awaitLivePage(timeoutMs: Long, extra: String = "true", detail: () -> String = { "" }) {
     Qa.until(timeoutMs, "live herdr page", detail) {
-        Qa.js("$TITLE_IS_HERDR && location.host === 'herdr.example.com' && ($extra)") == true
+        Qa.js("$TITLE_IS_HERDR && location.host === ${JSONObject.quote(Qa.liveHost)} && ($extra)") == true
     }
 }
 
@@ -57,7 +57,7 @@ class L1LiveLoadTest {
     fun liveLoad() {
         val token = LiveSupport.token()
         val label = LiveSupport.firstWorkspaceLabel(token)
-        Qa.resetState(alerts = false, token = token)
+        Qa.resetState(alerts = false, token = token, server = Qa.LIVE)
         liveGuardOn()
         ActivityScenario.launch(MainActivity::class.java).use {
             // The workspace label is rendered from the /ws snapshot: seeing it proves the
@@ -140,7 +140,7 @@ class L2BadTokenTest {
     @Test
     fun badTokenShowsRejection() {
         val real = LiveSupport.token()
-        Qa.resetState(alerts = false, token = ServiceToken(real.clientId, "wrong"))
+        Qa.resetState(alerts = false, token = ServiceToken(real.clientId, "wrong"), server = Qa.LIVE)
         liveGuardOn()
         ActivityScenario.launch(MainActivity::class.java).use {
             val shown = Qa.device.wait(Until.hasObject(By.textContains("토큰이 거부되었습니다")), 45_000)
@@ -157,7 +157,7 @@ class L3ExpiryRecoveryTest {
     @Test
     fun recoversAfterCookieExpiry() {
         val token = LiveSupport.token()
-        Qa.resetState(alerts = false, token = token)
+        Qa.resetState(alerts = false, token = token, server = Qa.LIVE)
         liveGuardOn()
         ActivityScenario.launch(MainActivity::class.java).use {
             awaitLivePage(60_000)
@@ -171,11 +171,11 @@ class L3ExpiryRecoveryTest {
             var onAccess = false
             Qa.until(60_000, "herdr page again after the reload (new document)") {
                 val host = Qa.jsString("location.host")
-                if (host == Qa.ACCESS_HOST) onAccess = true
-                Qa.js("window.__l3old === undefined && document.title === ${JSONObject.quote(TITLE)} && location.host === 'herdr.example.com'") == true
+                if (Qa.isAccessHost(host)) onAccess = true
+                Qa.js("window.__l3old === undefined && document.title === ${JSONObject.quote(TITLE)} && location.host === ${JSONObject.quote(Qa.liveHost)}") == true
             }
             assertTrue("a Cloudflare Access page was displayed", !onAccess)
-            assertEquals("herdr.example.com", Qa.jsString("location.host"))
+            assertEquals(Qa.liveHost, Qa.jsString("location.host"))
         }
     }
 }
@@ -187,7 +187,7 @@ class L4LiveDownloadTest {
     @Test
     fun faviconDownloadsThroughTheAppListener() {
         val token = LiveSupport.token()
-        Qa.resetState(alerts = false, token = token)
+        Qa.resetState(alerts = false, token = token, server = Qa.LIVE)
         liveGuardOn()
         val context = Qa.targetContext
         val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager

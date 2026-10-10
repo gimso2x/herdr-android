@@ -44,7 +44,7 @@ class TerminalDiagTest {
     /** Polls the metrics (bounded) until a terminal grid with rows or a chat transcript shows; logs them. */
     private fun collect(scenario: String, metrics: String, timeoutMs: Long = 35_000) {
         try {
-            Qa.awaitHost("herdr.example.com", 60_000)
+            Qa.awaitHost(Qa.liveHost, 60_000)
         } catch (e: AssertionError) {
             log(scenario, "host", "never reached: ${e.message?.take(200)}")
         }
@@ -124,7 +124,7 @@ class TerminalDiagTest {
         log("setup", "snapshot", "panes=${panes.length()} workspaces=${snapshot.getJSONArray("workspaces").length()}")
         val metrics = asset("diag_metrics.js")
 
-        Qa.resetState(alerts = false, token = token)
+        Qa.resetState(alerts = false, token = token, server = Qa.LIVE)
         check(LiveQaGuard.isSupported()) { "DOCUMENT_START_SCRIPT unsupported by this WebView" }
         LiveQaGuard.enableDiagnostic(Qa.LIVE)
 
@@ -144,13 +144,13 @@ class TerminalDiagTest {
         // 3. A direct terminal URL loaded into the WebView after a normal start.
         clearPageStorage()
         ActivityScenario.launch(MainActivity::class.java).use {
-            Qa.awaitHost("herdr.example.com", 60_000)
+            Qa.awaitHost(Qa.liveHost, 60_000)
             val encoded = java.net.URLEncoder.encode(paneId, "UTF-8").replace("+", "%20")
             Qa.js("window.__diagOld = 1")
             Qa.loadUrl("${Qa.LIVE}/?machine=local&pane=$encoded&view=terminal")
             Qa.awaitJs(
                 "direct terminal URL committed", 60_000,
-                "typeof window.__diagOld === 'undefined' && location.host === 'herdr.example.com' && document.readyState === 'complete'",
+                "typeof window.__diagOld === 'undefined' && location.host === ${JSONObject.quote(Qa.liveHost)} && document.readyState === 'complete'",
             )
             collect("direct-terminal", metrics)
         }

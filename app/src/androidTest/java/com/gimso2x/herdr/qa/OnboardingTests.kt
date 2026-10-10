@@ -72,16 +72,37 @@ private object Ob {
         return firedIntent(action)!!
     }
 
-    /** The row's button, scrolling the checklist down until it shows (a click hits its visible part). */
+    /**
+     * The row's button, fully inside the list's viewport (above the fixed bottom bar). Deterministic:
+     * check as it is, else go to the top and sweep down in slow steps until the list reports that it
+     * cannot scroll further (so a button above the viewport is found as surely as one below it), looking
+     * after every step. Only a fully drawn text counts: mid-fling snapshots list half-clipped nodes.
+     */
     fun button(text: String): UiObject2 {
         val device = Qa.device
         assertNotNull("onboarding screen did not show", device.wait(Until.hasObject(By.text("처음 설정 안내")), 30_000))
-        repeat(12) {
-            // Only a fully drawn text counts: mid-fling snapshots list half-clipped nodes.
-            device.findObject(By.text(text))?.takeIf { it.visibleBounds.height() >= 14 }?.let { return it }
-            // Slow drag (no fling), then let the list and its accessibility tree settle.
-            device.findObject(By.scrollable(true))?.scroll(Direction.DOWN, 0.4f, 400)
+
+        fun shown(): UiObject2? {
+            val node = device.findObject(By.text(text)) ?: return null
+            val area = device.findObject(By.scrollable(true))?.visibleBounds ?: return null
+            val barTop = device.findObject(By.text("시작하기"))?.visibleBounds?.top?.takeIf { it > area.top } ?: area.bottom
+            val b = node.visibleBounds
+            return node.takeIf { b.height() >= 14 && b.top >= area.top && b.bottom <= minOf(area.bottom, barTop) }
+        }
+
+        shown()?.let { return it }
+        toTop()
+        var steps = 0
+        while (steps++ < 40) {
+            shown()?.let { return it }
+            val area = device.findObject(By.scrollable(true)) ?: break
+            // Slow drag (no fling); false means the end of the list was reached.
+            val more = area.scroll(Direction.DOWN, 0.3f, 400)
             device.waitForIdle(2_000)
+            if (!more) {
+                shown()?.let { return it }
+                break
+            }
         }
         val out = java.io.ByteArrayOutputStream()
         device.dumpWindowHierarchy(out)
@@ -144,10 +165,11 @@ class O1SetupToOnboardingTest {
         try {
             ActivityScenario.launch<SetupActivity>(SetupActivity.intent(Qa.targetContext)).use {
                 val fields = Qa.device.wait(Until.findObjects(By.clazz("android.widget.EditText")), 60_000)
-                assertTrue("setup fields not shown", fields != null && fields.size >= 2)
+                assertTrue("setup fields not shown", fields != null && fields.size >= 3)
                 val token = Qa.syntheticToken()
-                fields[0].text = token.clientId
-                fields[1].text = token.clientSecret
+                fields[0].text = fx.base
+                fields[1].text = token.clientId
+                fields[2].text = token.clientSecret
                 val connect = Qa.device.wait(Until.findObject(By.text("연결").enabled(true)), 30_000)
                 assertNotNull("connect button never enabled", connect)
                 connect.click()

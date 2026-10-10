@@ -44,8 +44,16 @@ class FakeClock(@Volatile var now: Long = System.currentTimeMillis()) : Clock {
  */
 object Qa {
     const val PKG = "com.gimso2x.herdr"
-    const val LIVE = "https://herdr.example.com"
-    const val ACCESS_HOST = "your-team.cloudflareaccess.com"
+    /** An arbitrary https origin for cookie-only scenarios (nothing is contacted). */
+    const val SAMPLE = "https://herdr.example.com"
+
+    /** The live server, from the CI token file (`baseUrl`); only live scenarios touch it. */
+    val LIVE: String by lazy { LiveSupport.baseUrl() }
+
+    fun isAccessHost(host: String?): Boolean = com.gimso2x.herdr.access.ServerAddress.isAccessHost(host)
+
+    /** Host of [LIVE]. */
+    val liveHost: String get() = java.net.URI(LIVE).host
     private const val POLL_MS = 50L
 
     val instr: Instrumentation get() = InstrumentationRegistry.getInstrumentation()
@@ -209,10 +217,17 @@ object Qa {
     }
 
     /** Hooks, overrides and persisted state back to a known baseline; [token] null clears it. */
-    fun resetState(alerts: Boolean, token: ServiceToken?) {
+    fun resetState(alerts: Boolean, token: ServiceToken?, server: String? = null) {
         hooksReset()
         setAlerts(alerts)
         if (token == null) app.tokenStore.clear() else check(app.tokenStore.put(token)) { "token store unavailable" }
+        // The address starts from "none" every time; live scenarios pass the real one.
+        app.tokenStore.clearServer()
+        HerdrConfig.setServerAddress(null)
+        if (server != null) {
+            check(app.tokenStore.putServer(server)) { "server address not stored" }
+            HerdrConfig.setServerAddress(server)
+        }
         onMain {
             CookieManager.getInstance().removeAllCookies(null)
             CookieManager.getInstance().flush()

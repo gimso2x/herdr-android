@@ -84,7 +84,7 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     private val app get() = application as HerdrApplication
     private val clock: Clock = AccessTestHooks.clock ?: Clock.SYSTEM
-    private val policy = UrlPolicy(debugOrigin = HerdrConfig.baseUrl.takeIf { it != HerdrConfig.BASE_URL })
+    private val policy = UrlPolicy { HerdrConfig.baseUrlOrNull }
     private val recovery = AccessRecovery(clock)
     private val scheduler = RefreshScheduler(
         clock = clock,
@@ -101,8 +101,8 @@ class MainActivity : ComponentActivity() {
     private val started = MutableStateFlow(false)
     private var startJob: Job? = null
 
-    private var startUrl: String = "${HerdrConfig.baseUrl}/"
-    private var lastHerdrUrl: String = startUrl
+    private var startUrl: String? = null
+    private var lastHerdrUrl: String? = null
 
     /** Saved WebView state waiting for a fresh session before it is restored (null on fresh starts). */
     private var pendingState: Bundle? = null
@@ -243,7 +243,7 @@ class MainActivity : ComponentActivity() {
     /** A stored token with the checklist not done yet (first run after an update): show it once. */
     private suspend fun openOnboardingIfPending() {
         if (AppPreferences(this).onboardingDone) return
-        val hasToken = withContext(Dispatchers.IO) { app.tokenStore.get() != null }
+        val hasToken = withContext(Dispatchers.IO) { app.tokenStore.get() != null && HerdrConfig.isConfigured }
         if (hasToken && !AppPreferences(this).onboardingDone) startActivity(OnboardingActivity.intent(this))
     }
 
@@ -273,7 +273,7 @@ class MainActivity : ComponentActivity() {
             pane != null -> navigate(pane)
             reloadAfterSetup -> {
                 reloadAfterSetup = false
-                navigate(lastHerdrUrl)
+                navigate(lastUrl())
             }
         }
     }
@@ -362,19 +362,26 @@ class MainActivity : ComponentActivity() {
         lastHerdrUrl = url
     }
 
+    private fun rootUrl(): String = "${HerdrConfig.baseUrl}/"
+
+    private fun lastUrl(): String = lastHerdrUrl ?: rootUrl()
+
     private fun retry() {
         startUrl = lastHerdrUrl
         startFlow()
     }
 
-    /** No token -> setup; else a fresh session, then restore the saved page or load [startUrl]. */
+    /** No token or no server address -> setup; else a fresh session, then restore the saved page or load [startUrl]. */
     private fun startFlow() {
         showRetry = false
         startJob?.cancel()
         startJob = lifecycleScope.launch {
-            val hasToken = withContext(Dispatchers.IO) { app.tokenStore.get() != null }
-            if (!hasToken) {
-                startActivity(SetupActivity.intent(this@MainActivity))
+            val (hasToken, configured) = withContext(Dispatchers.IO) {
+                (app.tokenStore.get() != null) to HerdrConfig.isConfigured
+            }
+            if (!hasToken || !configured) {
+                // An update from a build without the address field: the token is kept, only the address is asked.
+                startActivity(SetupActivity.intent(this@MainActivity, addressOnly = hasToken))
                 finish()
                 return@launch
             }
@@ -402,7 +409,7 @@ class MainActivity : ComponentActivity() {
             hasPendingState = saved != null,
             pendingStartUrl = pendingStartUrl,
             paneUrl = pendingPaneUrl,
-            rootUrl = startUrl,
+            rootUrl = startUrl ?: rootUrl(),
         )
         pendingState = null
         pendingStartUrl = null
@@ -454,7 +461,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             try {
                 when (val outcome = RefreshOutcome.of(app.accessSession.ensureFresh(force = true))) {
-                    RefreshOutcome.Fresh -> webView.loadUrl(lastHerdrUrl)
+                    RefreshOutcome.Fresh -> webView.loadUrl(lastUrl())
                     RefreshOutcome.KeepPage -> showRetry = true
                     is RefreshOutcome.NeedsSetup -> {
                         reloadAfterSetup = true

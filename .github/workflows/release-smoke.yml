@@ -44,6 +44,7 @@ jobs:
       - name: Smoke the release APK on the emulator
         uses: reactivecircus/android-emulator-runner@v2
         env:
+          BASE_URL: ${{ secrets.HERDR_BASE_URL }}
           CF_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_CI }}
           CF_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET_CI }}
           SMOKE_BAD_TOKEN: ${{ inputs.bad_token && '1' || '0' }}
@@ -63,13 +64,15 @@ jobs:
         id: scan
         if: always()
         env:
+          BASE_URL: ${{ secrets.HERDR_BASE_URL }}
           CF_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_CI }}
           CF_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET_CI }}
         run: |
-          test -n "$CF_ID" && test -n "$CF_SECRET" || { echo 'scan secrets are missing' >&2; exit 1; }
+          test -n "$CF_ID" && test -n "$CF_SECRET" && test -n "$BASE_URL" || { echo 'scan secrets are missing' >&2; exit 1; }
+          BASE_HOST=${BASE_URL#https://}
           files=0
           if [ -d release-smoke ]; then
-            files=$( { grep -r -l -F -e "$CF_SECRET" -e "$CF_ID" release-smoke 2>/dev/null || true; } | wc -l)
+            files=$( { grep -r -l -F -e "$CF_SECRET" -e "$CF_ID" -e "$BASE_HOST" release-smoke 2>/dev/null || true; } | wc -l)
           fi
           echo "secret-scan files=$files"
           test "$files" -eq 0

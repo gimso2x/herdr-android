@@ -91,7 +91,7 @@ class DeepLinkMalformedPaneTest {
         assertEquals(url, 3, uri.rawQuery.split("&").size)
         assertNull(url, uri.rawFragment)
         assertNull(url, uri.rawUserInfo)
-        assertEquals(UrlDecision.InApp, UrlPolicy().decide(url, true))
+        assertEquals(UrlDecision.InApp, UrlPolicy("https://herdr.example.com").decide(url, true))
     }
 
     @Test

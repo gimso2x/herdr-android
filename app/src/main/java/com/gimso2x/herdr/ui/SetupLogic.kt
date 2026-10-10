@@ -1,6 +1,7 @@
 package com.gimso2x.herdr.ui
 
 import com.gimso2x.herdr.access.BootstrapResult
+import com.gimso2x.herdr.access.ServerAddress
 import com.gimso2x.herdr.access.ServiceToken
 
 /** Why setup could not finish. The UI maps each value to a Korean string resource. */
@@ -42,6 +43,9 @@ object SetupLogic {
         BootstrapResult.Network -> SetupError.NETWORK
         is BootstrapResult.Unexpected -> SetupError.UNEXPECTED
     }
+
+    /** The normalised server address, or null while [input] is not an acceptable one (see [ServerAddress]). */
+    fun address(input: String, allowLoopback: Boolean = false): String? = ServerAddress.parse(input, allowLoopback)
 
     /** First 4 characters of the client id followed by an ellipsis; never more of the id. */
     fun maskClientId(clientId: String): String = clientId.trim().take(4) + "…"

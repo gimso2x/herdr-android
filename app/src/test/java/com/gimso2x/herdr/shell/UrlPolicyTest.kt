@@ -6,7 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UrlPolicyTest {
-    private val policy = UrlPolicy()
+    private val policy = UrlPolicy("https://herdr.example.com")
 
     private fun main(url: String) = policy.decide(url, isMainFrame = true)
 
@@ -23,20 +23,20 @@ class UrlPolicyTest {
 
     @Test
     fun hostAndSchemeAreCaseInsensitive() {
-        assertEquals(UrlDecision.InApp, main("HTTPS://HERDR.EXAMPLE.COM/Path"))
-        assertEquals(UrlDecision.InApp, main("https://Herdr.Example.Com/"))
-        assertEquals(UrlDecision.RefreshSession, main("https://YOUR-TEAM.CloudflareAccess.com/cdn-cgi/access/login"))
+        assertEquals(UrlDecision.InApp, main("HTTPS://HERDR.example.com/Path"))
+        assertEquals(UrlDecision.InApp, main("https://Herdr.example.com/"))
+        assertEquals(UrlDecision.RefreshSession, main("https://TEAM.CloudflareAccess.com/cdn-cgi/access/login"))
     }
 
     @Test
     fun accessMainFrameRefreshesSession() {
-        val url = "https://your-team.cloudflareaccess.com/cdn-cgi/access/login/herdr.example.com?kid=abc"
+        val url = "https://team.cloudflareaccess.com/cdn-cgi/access/login/herdr.example.com?kid=abc"
         assertEquals(UrlDecision.RefreshSession, main(url))
     }
 
     @Test
     fun accessSubframeIsBlockedNotRefreshed() {
-        assertEquals(UrlDecision.Block, sub("https://your-team.cloudflareaccess.com/x"))
+        assertEquals(UrlDecision.Block, sub("https://team.cloudflareaccess.com/x"))
     }
 
     @Test
@@ -59,8 +59,7 @@ class UrlPolicyTest {
             "https://example.com/",
             "https://herdr.example.com:8443/",
             "http://herdr.example.com/",
-            "https://your-team.cloudflareaccess.com.evil.com/",
-            "https://evil.your-team.cloudflareaccess.com/",
+            "https://team.cloudflareaccess.com.evil.com/",
         )
         for (url in urls) {
             val decision = main(url)
@@ -75,7 +74,7 @@ class UrlPolicyTest {
             "https://herdr.example.com@evil.com/",
             "https://herdr.example.com:pw@evil.com/",
             "https://evil.com@herdr.example.com/",
-            "https://your-team.cloudflareaccess.com@evil.com/",
+            "https://team.cloudflareaccess.com@evil.com/",
         )
         for (url in urls) {
             assertTrue("$url", main(url) is UrlDecision.External)
@@ -158,20 +157,43 @@ class UrlPolicyTest {
     }
 
     @Test
-    fun debugOriginIsAdditiveAndExact() {
-        val debug = UrlPolicy(debugOrigin = "http://127.0.0.1:41234")
+    fun fixtureBaseIsExact() {
+        val debug = UrlPolicy("http://127.0.0.1:41234")
         assertEquals(UrlDecision.InApp, debug.decide("http://127.0.0.1:41234/", true))
-        assertEquals(UrlDecision.InApp, debug.decide("https://herdr.example.com/", true))
+        assertTrue(debug.decide("https://herdr.example.com/", true) is UrlDecision.External)
         assertTrue(debug.decide("http://127.0.0.1:9999/", true) is UrlDecision.External)
         assertTrue(debug.decide("http://127.0.0.1/", true) is UrlDecision.External)
         assertTrue(debug.decide("https://127.0.0.1:41234/", true) is UrlDecision.External)
         assertTrue(debug.decide("http://127.0.0.1.evil.com:41234/", true) is UrlDecision.External)
     }
+    @Test
+    fun nothingIsInAppWithoutAConfiguredServer() {
+        val none = UrlPolicy(null)
+        assertTrue(none.decide("https://herdr.example.com/", true) is UrlDecision.External)
+        assertEquals(UrlDecision.Block, none.decide("https://herdr.example.com/", false))
+        assertTrue(none.decide("http://127.0.0.1/", true) is UrlDecision.External)
+    }
 
     @Test
-    fun releasePolicyDoesNotAllowLoopback() {
-        assertTrue(main("http://127.0.0.1:41234/") is UrlDecision.External)
-        assertTrue(UrlPolicy(debugOrigin = "not a url").decide("http://127.0.0.1/", true) is UrlDecision.External)
+    fun changedAddressTakesEffectAtOnce() {
+        var base: String? = "https://one.example.net"
+        val live = UrlPolicy { base }
+        assertEquals(UrlDecision.InApp, live.decide("https://one.example.net/x", true))
+        base = "https://two.example.net"
+        assertTrue(live.decide("https://one.example.net/x", true) is UrlDecision.External)
+        assertEquals(UrlDecision.InApp, live.decide("https://two.example.net/x", true))
+    }
+
+    @Test
+    fun anyAccessTeamHostIsALoginRedirect() {
+        for (host in listOf("team.cloudflareaccess.com", "other-team.cloudflareaccess.com", "a.b.cloudflareaccess.com")) {
+            assertEquals(host, UrlDecision.RefreshSession, main("https://$host/cdn-cgi/access/login/herdr.example.com?kid=1"))
+            assertEquals(host, UrlDecision.Block, sub("https://$host/x"))
+        }
+        for (host in listOf("cloudflareaccess.com", "evilcloudflareaccess.com", "team.cloudflareaccess.com.evil.com")) {
+            assertTrue(host, main("https://$host/").let { it is UrlDecision.External })
+        }
+        assertTrue(main("http://team.cloudflareaccess.com/") is UrlDecision.External)
     }
 
     @Test
