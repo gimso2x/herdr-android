@@ -69,19 +69,25 @@ run_phase() {
   RAN+=("$cls")
   echo "=== phase $cls (api $API)"
   adb logcat -c
-  timeout "$PHASE_TIMEOUT" adb shell am instrument -w -r -e class "$TEST_PKG.$cls" "$RUNNER" 2>&1 | tee "$out"
+  # -k: a wedged adb client ignores SIGTERM; without it one stuck phase held the job until the 40 min cap.
+  timeout -k 15 "$PHASE_TIMEOUT" adb shell am instrument -w -r -e class "$TEST_PKG.$cls" "$RUNNER" 2>&1 | tee "$out"
+  local rc=${PIPESTATUS[0]}
+  if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+    echo "phase $cls hit the ${PHASE_TIMEOUT}s limit (rc=$rc); device state: $(timeout 20 adb get-state 2>&1 | tr -d '\r\n')"
+    timeout 20 adb devices | tee -a "$out"
+  fi
   # Facts the tests log on purpose (tag QaFail), kept for passing phases too.
-  adb logcat -d -s QaFail 2>/dev/null | grep -v '^---' >"$OUT/$cls-facts.txt" || true
+  timeout 60 adb logcat -d -s QaFail 2>/dev/null | grep -v '^---' >"$OUT/$cls-facts.txt" || true
   [ -s "$OUT/$cls-facts.txt" ] || rm -f "$OUT/$cls-facts.txt"
   if grep -q '^OK (' "$out" && ! grep -q 'FAILURES!!!' "$out"; then
     echo "=== phase $cls: OK"
   else
     fail "phase $cls did not report OK"
     # Crash/diagnostic lines of the failed phase only: app tags, crashes, test failure facts.
-    adb logcat -d -s QaFail HerdrWatch HerdrBoot HerdrDownload AndroidRuntime:E >"$OUT/$cls-log.txt" 2>&1 || true
-    adb logcat -d -b all -t 600 '*:W' >"$OUT/$cls-log-all.txt" 2>&1 || true
-    adb logcat -d -b events -s am_kill am_crash am_proc_died am_anr am_low_memory >"$OUT/$cls-events.txt" 2>&1 || true
-    adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
+    timeout 60 adb logcat -d -s QaFail HerdrWatch HerdrBoot HerdrDownload AndroidRuntime:E >"$OUT/$cls-log.txt" 2>&1 || true
+    timeout 60 adb logcat -d -b all -t 600 '*:W' >"$OUT/$cls-log-all.txt" 2>&1 || true
+    timeout 60 adb logcat -d -b events -s am_kill am_crash am_proc_died am_anr am_low_memory >"$OUT/$cls-events.txt" 2>&1 || true
+    timeout 30 adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
   fi
 }
 
