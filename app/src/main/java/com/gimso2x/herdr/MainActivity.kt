@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -293,6 +294,10 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     private fun createWebView(): WebView {
         val view = WebView(this)
+        // Without params Compose's AndroidView hands the view wrap_content ones; Chromium then forces a
+        // zero layout height and vh/dvh/svh/lvh all compute to 0 (innerHeight stays right). herdr-web-ui
+        // sizes its shell with `height: var(--app-height, 100dvh)`, so every pane collapsed to 0px.
+        view.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         view.setBackgroundColor(ContextCompat.getColor(this, R.color.shell_background))
         view.settings.apply {
             javaScriptEnabled = true
