@@ -92,7 +92,23 @@ class L1LiveLoadTest {
                         "' expanded='+document.querySelector('button.drawer-toggle').getAttribute('aria-expanded')})()")}"
                 },
             ) { Qa.js(labelInViewport(quoted)) == true }
+            // The slide-in transition has ended and the toggle reports the drawer open.
+            Qa.awaitJs(
+                "drawer open and settled",
+                20_000,
+                "document.querySelector('button.drawer-toggle').getAttribute('aria-expanded') === 'true' && " +
+                    "document.getElementById('workspace-drawer').classList.contains('is-open') && " +
+                    "document.getElementById('workspace-drawer').getAnimations().length === 0",
+            )
             Qa.awaitFrame()
+            Qa.logFact(
+                "l1 drawer: " + Qa.js(
+                    "(function(){var d=document.getElementById('workspace-drawer');var b=d.getBoundingClientRect();" +
+                        "var t=document.querySelector('button.drawer-toggle');" +
+                        "return 'class='+d.className+' vis='+getComputedStyle(d).visibility+' left='+b.left+' right='+b.right+" +
+                        "' vw='+window.innerWidth+' expanded='+t.getAttribute('aria-expanded')+' vs='+document.visibilityState})()",
+                ),
+            )
             assertEquals(0L, (Qa.js("window.__qaBlocked") as Number).toLong())
             Qa.screenshot("l1.png")
         }
