@@ -253,6 +253,9 @@ object Qa {
 
     fun reload() = onMain { webViewUnsafe()!!.reload() }
 
+    /** Loads [url] straight into the app's WebView (diagnostics: a direct URL, not the deep link). */
+    fun loadUrl(url: String) = onMain { webViewUnsafe()!!.loadUrl(url) }
+
     /**
      * Asks the window to show the keyboard for the focused page. Used after a real tap focused an
      * input: whether Chromium's own show request wins the race against a cold, overloaded Gboard

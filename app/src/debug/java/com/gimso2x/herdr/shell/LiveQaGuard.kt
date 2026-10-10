@@ -14,8 +14,18 @@ import androidx.webkit.WebViewFeature
 object LiveQaGuard {
     const val ASSET = "live_qa_guard.js"
 
+    /**
+     * Terminal diagnostics only (TerminalDiagTest): the narrowed guard that keeps the interact role and
+     * lets attach/resize through, still dropping input/keys/submit/pending-action/secret/take-over and
+     * every non-GET request, plus the metrics probe. See the header of the asset.
+     */
+    const val DIAG_ASSET = "diag_probe.js"
+
     @Volatile
     private var origin: String? = null
+
+    @Volatile
+    private var asset: String = ASSET
 
     /** [origin] is scheme://host[:port], e.g. `https://herdr.example.com`. */
     fun enable(origin: String) {
@@ -24,10 +34,18 @@ object LiveQaGuard {
             "origin must not contain a path"
         }
         this.origin = origin
+        this.asset = ASSET
+    }
+
+    /** Like [enable] but installs the narrowed diagnostic guard and probe instead of the read-only guard. */
+    fun enableDiagnostic(origin: String) {
+        enable(origin)
+        asset = DIAG_ASSET
     }
 
     fun disable() {
         origin = null
+        asset = ASSET
     }
 
     val isEnabled: Boolean get() = origin != null
@@ -41,7 +59,7 @@ object LiveQaGuard {
     fun installIfEnabled(context: Context, webView: WebView): Boolean {
         val origin = origin ?: return false
         check(isSupported()) { "DOCUMENT_START_SCRIPT unsupported; refusing to load the live site unguarded" }
-        val script = context.assets.open(ASSET).bufferedReader().use { it.readText() }
+        val script = context.assets.open(asset).bufferedReader().use { it.readText() }
         WebViewCompat.addDocumentStartJavaScript(webView, script, setOf(origin))
         return true
     }
