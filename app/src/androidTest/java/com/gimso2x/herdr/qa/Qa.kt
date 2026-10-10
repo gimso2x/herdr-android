@@ -133,6 +133,25 @@ object Qa {
         shell("screencap -p /sdcard/Download/qa/$name")
     }
 
+    /** The display as it is composited right now (the DOM can be ahead of the screen by a frame or more). */
+    fun screenBitmap(): android.graphics.Bitmap {
+        val pfd = instr.uiAutomation.executeShellCommand("screencap -p")
+        val bytes = ParcelFileDescriptor.AutoCloseInputStream(pfd).use { it.readBytes() }
+        return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: throw AssertionError("screencap produced no image")
+    }
+
+    /** Fraction of pixels (0..1) whose colour differs between two equally sized screenshots. */
+    fun changedFraction(a: android.graphics.Bitmap, b: android.graphics.Bitmap): Double {
+        if (a.width != b.width || a.height != b.height) return 1.0
+        val pa = IntArray(a.width * a.height)
+        val pb = IntArray(b.width * b.height)
+        a.getPixels(pa, 0, a.width, 0, 0, a.width, a.height)
+        b.getPixels(pb, 0, b.width, 0, 0, b.width, b.height)
+        var changed = 0
+        for (i in pa.indices) if (pa[i] != pb[i]) changed++
+        return changed.toDouble() / pa.size
+    }
+
     // --- state -------------------------------------------------------------------------------
 
     fun syntheticToken(): ServiceToken = ServiceToken("qa-fixture-id", "qa-fixture-secret")

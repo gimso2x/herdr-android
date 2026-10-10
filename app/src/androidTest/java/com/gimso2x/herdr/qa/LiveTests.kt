@@ -80,6 +80,7 @@ class L1LiveLoadTest {
             // Open the workspace list drawer with a real tap (a client-side toggle, nothing is
             // sent), unless the page already shows it open (a tap would close it), then wait for
             // the first workspace label element to be laid out inside the viewport.
+            val before = Qa.screenBitmap()
             if (Qa.js("document.querySelector('button.drawer-toggle').getAttribute('aria-expanded') === 'true'") != true) {
                 Qa.tap("button.drawer-toggle")
             }
@@ -110,6 +111,14 @@ class L1LiveLoadTest {
                 ),
             )
             assertEquals(0L, (Qa.js("window.__qaBlocked") as Number).toLong())
+            // The DOM can be a frame or more ahead of what the display shows: capture only once
+            // the composited screen differs substantially from the closed-drawer baseline.
+            var changed = 0.0
+            Qa.until(20_000, "screen shows the open drawer", { "changedFraction=$changed" }) {
+                changed = Qa.changedFraction(before, Qa.screenBitmap())
+                changed >= 0.15
+            }
+            Qa.logFact("l1 screen changed fraction=$changed")
             Qa.screenshot("l1.png")
         }
     }
