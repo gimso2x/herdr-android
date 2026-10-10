@@ -246,7 +246,9 @@ resumed MainActivity || die "MainActivity no longer resumed"
 adb exec-out screencap -p >"$OUT/release-smoke.png" || die "screencap failed"
 png_bytes=$(stat -c %s "$OUT/release-smoke.png")
 note "screenshot release-smoke.png bytes=$png_bytes"
-[ "$png_bytes" -gt 20000 ] || die "screenshot is suspiciously small"
+# The emulator screen is only 320x640 and the dark UI compresses well: a real herdr screenshot is ~14 KB.
+[ "$png_bytes" -gt 5000 ] || die "screenshot is suspiciously small"
+[ "$(head -c 4 "$OUT/release-smoke.png" | tail -c 3)" = "PNG" ] || die "screenshot is not a PNG"
 
 adb shell pidof "$PKG" >/dev/null || die "app process is not alive"
 fatal=$(adb logcat -d | grep -c -E 'FATAL EXCEPTION|AndroidRuntime: Process: com.gimso2x.herdr' || true)
