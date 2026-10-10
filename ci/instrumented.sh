@@ -105,6 +105,14 @@ run_phase() {
   local cls="$1" out="$OUT/$1.txt"
   RAN+=("$cls")
   echo "=== phase $cls (api $API)"
+  # A dead emulator makes every later adb call wait forever (one run idled 40 min on "waiting for device"):
+  # say so once and stop instead.
+  if [ "$(timeout 30 adb get-state 2>/dev/null | tr -d '\r\n')" != "device" ]; then
+    echo "FATAL: the emulator is gone before phase $cls (adb get-state != device); qemu processes: $(pgrep -c -f qemu-system || true)"
+    FAILED+=("emulator lost before $cls")
+    echo "=== QA SUMMARY: aborted"
+    exit 1
+  fi
   adb logcat -c
   # -k: a wedged adb client ignores SIGTERM; without it one stuck phase held the job until the 40 min cap.
   timeout -k 15 "$PHASE_TIMEOUT" adb shell am instrument -w -r -e class "$TEST_PKG.$cls" "$RUNNER" 2>&1 | tee "$out"
