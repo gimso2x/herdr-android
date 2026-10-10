@@ -6,7 +6,6 @@ import android.app.Instrumentation
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.provider.Settings
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.intent.Intents
@@ -40,6 +39,9 @@ import org.junit.runner.RunWith
 
 private const val PKG = "com.gimso2x.herdr"
 
+// What ActivityResultContracts.RequestPermission launches today (androidx.activity 1.11): the platform action.
+private const val ACTION_REQUEST_PERMISSIONS = "android.content.pm.action.REQUEST_PERMISSIONS"
+
 private object Ob {
     /** Intents of the app process stubbed to a cancelled result: the system screens never open. */
     private val ACTIONS = listOf(
@@ -48,7 +50,7 @@ private object Ob {
         Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS,
         Intent.ACTION_AUTO_REVOKE_PERMISSIONS,
         Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-        ActivityResultContracts.RequestMultiplePermissions.ACTION_REQUEST_PERMISSIONS,
+        ACTION_REQUEST_PERMISSIONS,
     )
 
     fun stubSystemScreens() {
@@ -70,19 +72,16 @@ private object Ob {
         return firedIntent(action)!!
     }
 
-    /** The row's button, scrolling the checklist until its centre is inside the scrollable area. */
+    /** The row's button, scrolling the checklist down until it shows (a click hits its visible part). */
     fun button(text: String): UiObject2 {
         val device = Qa.device
         assertNotNull("onboarding screen did not show", device.wait(Until.hasObject(By.text("처음 설정 안내")), 30_000))
         repeat(12) {
-            val node = device.findObject(By.text(text))
-            val area = device.findObject(By.scrollable(true))
-            if (node != null && (area == null || area.visibleBounds.contains(node.visibleCenter.x, node.visibleCenter.y))) {
-                return node
-            }
-            area?.scroll(Direction.DOWN, 0.5f)
+            device.findObject(By.text(text))?.let { return it }
+            device.findObject(By.scrollable(true))?.scroll(Direction.DOWN, 0.6f)
         }
-        throw AssertionError("button '$text' not found on the onboarding screen")
+        val seen = device.findObjects(By.text(Pattern.compile(".+"))).map { it.text }
+        throw AssertionError("button '$text' not found on the onboarding screen; visible=$seen")
     }
 
     /** A control outside the scrolling list (the bottom bar). */
@@ -320,7 +319,7 @@ class O2PermissionRequestTest {
         Ob.stubSystemScreens()
         ActivityScenario.launch(OnboardingActivity::class.java).use {
             Ob.button("허용하기").click()
-            Ob.awaitFired(ActivityResultContracts.RequestMultiplePermissions.ACTION_REQUEST_PERMISSIONS)
+            Ob.awaitFired(ACTION_REQUEST_PERMISSIONS)
             Qa.until(10_000, "asked flag stored") { AppPreferences(Qa.targetContext).notificationPermissionAsked }
 
             // The stubbed dialog never ran, so the system still allows no rationale: treated as permanently denied.
