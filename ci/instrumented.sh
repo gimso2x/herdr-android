@@ -200,6 +200,16 @@ group() {
       adb shell pm revoke "$PKG" android.permission.POST_NOTIFICATIONS
       run_phase W4PermissionOffTest
       adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS
+# The app holds a connection to Play services' fonts provider; when Play services dies on the
+# small runner the system kills every client of its providers, the app under test included.
+if adb root >/dev/null 2>&1 && adb wait-for-device && wait_until 30 is_root; then
+  adb shell pm disable com.google.android.gms/com.google.android.gms.fonts.provider.FontsProvider 2>&1 | sed 's/^/gms fonts provider: /'
+else
+  echo "note: could not become root to disable the gms fonts provider"
+fi
+adb unroot >/dev/null 2>&1 || true
+adb wait-for-device
+wait_until 30 adb shell true >/dev/null 2>&1 || true
 # Let the freshly booted system settle (Play services ANRs and dying providers would kill the app
 # under test) and make sure the soft keyboard service is up before any scenario types.
 timeout 120 adb shell am wait-for-broadcast-idle >/dev/null 2>&1 || echo "note: broadcast queues not idle after 120 s"

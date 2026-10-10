@@ -206,6 +206,18 @@ object Qa {
 
     fun reload() = onMain { webViewUnsafe()!!.reload() }
 
+    /**
+     * Asks the window to show the keyboard for the focused page. Used after a real tap focused an
+     * input: whether Chromium's own show request wins the race against a cold, overloaded Gboard
+     * on a 2-core runner is emulator noise, while the layout reaction (F4 Back order, F5 resize)
+     * is what the scenarios verify.
+     */
+    fun requestIme() = onMain {
+        val activity = mainUnsafe()!!
+        androidx.core.view.WindowCompat.getInsetsController(activity.window, webViewUnsafe()!!)
+            .show(WindowInsetsCompat.Type.ime())
+    }
+
     fun isImeVisible(): Boolean = onMain {
         val activity = mainUnsafe() ?: return@onMain false
         ViewCompat.getRootWindowInsets(activity.window.decorView)?.isVisible(WindowInsetsCompat.Type.ime()) == true

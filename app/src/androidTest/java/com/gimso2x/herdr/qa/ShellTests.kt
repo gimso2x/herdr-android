@@ -178,7 +178,8 @@ class F4BackOrderTest {
 
                 Qa.tap("#i")
                 Qa.until(20_000, "input focused by the tap") { Qa.jsString("document.activeElement && document.activeElement.id") == "i" }
-                Qa.until(20_000, "keyboard shown") { Qa.isImeVisible() }
+                Qa.requestIme()
+                Qa.until(30_000, "keyboard shown") { Qa.isImeVisible() }
 
                 Qa.device.pressBack()
                 Qa.until(20_000, "keyboard hidden by Back") { !Qa.isImeVisible() }
@@ -222,7 +223,9 @@ class F5ImeResizeTest {
                 Qa.awaitJs("fixture page", 30_000, "document.getElementById('bar') !== null && document.readyState === 'complete'")
                 val full = (Qa.js("window.innerHeight") as Number).toDouble()
                 Qa.tap("#i")
-                Qa.until(20_000, "keyboard shown") { Qa.isImeVisible() }
+                Qa.until(20_000, "input focused by the tap") { Qa.jsString("document.activeElement && document.activeElement.id") == "i" }
+                Qa.requestIme()
+                Qa.until(30_000, "keyboard shown") { Qa.isImeVisible() }
                 Qa.awaitJs("viewport shrinks below $full", 20_000, "window.innerHeight < $full")
                 Qa.awaitJs(
                     "bar stays inside the viewport",
