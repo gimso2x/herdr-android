@@ -75,11 +75,27 @@ class U1UpgradePathTest {
                 assertNotNull(field)
                 field.text = fx.base
                 Qa.device.waitForIdle(5_000)
+                if (Qa.shell("dumpsys input_method").contains("mInputShown=true")) Qa.device.pressBack()
+                Qa.device.waitForIdle(5_000)
                 val connect = Qa.device.wait(Until.findObject(By.text("연결").enabled(true)), 30_000)
                 assertNotNull("connect button never enabled", connect)
-                connect.click()
-                Qa.until(60_000, "address stored", { "health=${fx.healthRequests()}" }) {
-                    Qa.app.tokenStore.getServer() == fx.base
+                // A tap can land while the screen is still settling; repeat it until the request is seen
+                // (connect() ignores a tap while one is already running).
+                Qa.until(
+                    60_000,
+                    "address stored",
+                    {
+                        val f = Qa.device.findObject(By.clazz("android.widget.EditText"))
+                        "health=${fx.healthRequests()} fieldLen=${runCatching { f?.text?.length }.getOrNull()} " +
+                            "live=${Qa.liveActivityNames()}"
+                    },
+                ) {
+                    if (Qa.app.tokenStore.getServer() == fx.base) {
+                        true
+                    } else {
+                        if (fx.healthRequests() == 0) runCatching { Qa.device.findObject(By.text("연결"))?.click() }
+                        false
+                    }
                 }
                 assertTrue("bootstrap used the stored token (fixture answers 403 otherwise)", fx.healthRequests() >= 1)
                 assertEquals(Qa.syntheticToken(), Qa.app.tokenStore.get())
