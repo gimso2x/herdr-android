@@ -197,15 +197,26 @@ class U2SettingsChangeTest {
                 assertTrue(a.count("/") >= 1)
                 val seenA = a.log.size
 
-                ActivityScenario.launch(SettingsActivity::class.java).use {
-                    val field = Qa.device.wait(Until.findObject(By.clazz("android.widget.EditText")), 30_000)
-                    assertNotNull(field)
-                    field.text = b.base
-                    val change = Qa.device.wait(Until.findObject(By.text("주소 바꾸기").enabled(true)), 30_000)
-                    assertNotNull("change button never enabled", change)
-                    change.click()
-                    Qa.until(60_000, "new address stored", { "health=${b.healthRequests()}" }) {
-                        Qa.app.tokenStore.getServer() == b.base && b.healthRequests() >= 1
+                Qa.targetContext.startActivity(
+                    android.content.Intent(Qa.targetContext, SettingsActivity::class.java)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+                val field = Qa.device.wait(Until.findObject(By.clazz("android.widget.EditText")), 30_000)
+                assertNotNull("settings not shown", field)
+                field.text = b.base
+                val change = Qa.device.wait(Until.findObject(By.text("주소 바꾸기").enabled(true)), 30_000)
+                assertNotNull("change button never enabled", change)
+                change.click()
+                Qa.until(60_000, "new address stored and bootstrapped", { "health=${b.healthRequests()}" }) {
+                    Qa.app.tokenStore.getServer() == b.base && b.issued.any { Qa.cookieFor(b.base).orEmpty().contains(it) }
+                }
+                // Back to the main page underneath (the first Back may only hide the keyboard).
+                Qa.until(30_000, "settings closed", { "live=${Qa.liveActivityNames()}" }) {
+                    if (Qa.liveActivityNames().contains("SettingsActivity")) {
+                        Qa.device.pressBack()
+                        false
+                    } else {
+                        true
                     }
                 }
 
