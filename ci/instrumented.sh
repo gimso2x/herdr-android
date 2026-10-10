@@ -134,6 +134,10 @@ run_phase() {
     echo "=== QA SUMMARY: aborted"
     exit 1
   fi
+  # A phase must start from a clean screen: an earlier phase can leave the notification shade open
+  # (it then covers every later UI scenario), so close it and return to the launcher first.
+  timeout 20 adb shell cmd statusbar collapse >/dev/null 2>&1 || true
+  timeout 20 adb shell input keyevent KEYCODE_HOME >/dev/null 2>&1 || true
   adb logcat -c
   # -k: a wedged adb client ignores SIGTERM; without it one stuck phase held the job until the 40 min cap.
   timeout -k 15 "$PHASE_TIMEOUT" adb shell am instrument -w -r -e class "$TEST_PKG.$cls" "$RUNNER" 2>&1 | tee "$out"
