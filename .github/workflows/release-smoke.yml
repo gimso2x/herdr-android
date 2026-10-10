@@ -1,0 +1,83 @@
+name: Release smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag whose app-release.apk is smoke-tested (e.g. v0.1.0)'
+        required: true
+      bad_token:
+        description: 'Type a wrong client secret and require the setup screen to show the rejection'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Download the release APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9A-Za-z.-]+$ ]] || { echo "bad tag: $TAG" >&2; exit 1; }
+          mkdir -p "$RUNNER_TEMP/apk"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p app-release.apk -D "$RUNNER_TEMP/apk" --clobber
+          sha256sum "$RUNNER_TEMP/apk/app-release.apk"
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install PulseAudio for the emulator audio backend
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq pulseaudio
+      - name: Smoke the release APK on the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          CF_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_CI }}
+          CF_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET_CI }}
+          SMOKE_BAD_TOKEN: ${{ inputs.bad_token && '1' || '0' }}
+        with:
+          api-level: 34
+          # AOSP image: no Play services (same as the instrumented job).
+          target: default
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -no-metrics
+          disk-size: 4096M
+          ram-size: 4096M
+          heap-size: 512M
+          pre-emulator-launch-script: pulseaudio --start --exit-idle-time=-1
+          disable-animations: true
+          script: ./ci/release-smoke.sh ${{ runner.temp }}/apk/app-release.apk
+      - name: Secret scan
+        id: scan
+        if: always()
+        env:
+          CF_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_CI }}
+          CF_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET_CI }}
+        run: |
+          test -n "$CF_ID" && test -n "$CF_SECRET" || { echo 'scan secrets are missing' >&2; exit 1; }
+          files=0
+          if [ -d release-smoke ]; then
+            files=$( { grep -r -l -F -e "$CF_SECRET" -e "$CF_ID" release-smoke 2>/dev/null || true; } | wc -l)
+          fi
+          echo "secret-scan files=$files"
+          test "$files" -eq 0
+      - name: Upload smoke artifacts
+        if: always() && steps.scan.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-smoke${{ inputs.bad_token && '-bad' || '' }}
+          path: release-smoke/
+          retention-days: 7
+          if-no-files-found: warn
