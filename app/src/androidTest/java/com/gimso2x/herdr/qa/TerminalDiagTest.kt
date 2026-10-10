@@ -78,6 +78,41 @@ class TerminalDiagTest {
             log(scenario, key, m.opt(key))
         }
         log(scenario, "verdict", "xterms=${m.optInt("xtermCount")} anyTall=${m.optBoolean("anyXtermTall")} anyRows=${m.optBoolean("anyXtermRows")}")
+        a11y(scenario)
+    }
+
+    /**
+     * What uiautomator (the release smoke's only view of the page) sees: accessibility nodes under the
+     * WebView, as counts and `class bounds text-length desc-length` shapes. Never any text.
+     */
+    private fun a11y(scenario: String) {
+        try {
+            val out = java.io.ByteArrayOutputStream()
+            Qa.device.dumpWindowHierarchy(out)
+            val doc = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder()
+                .parse(java.io.ByteArrayInputStream(out.toByteArray()))
+            val all = doc.getElementsByTagName("node")
+            var webView: org.w3c.dom.Element? = null
+            for (i in 0 until all.length) {
+                val e = all.item(i) as org.w3c.dom.Element
+                if (e.getAttribute("class") == "android.webkit.WebView") { webView = e; break }
+            }
+            if (webView == null) { log(scenario, "a11y", "total=${all.length} webview=none"); return }
+            val below = webView.getElementsByTagName("node")
+            var described = 0
+            val shapes = StringBuilder()
+            for (i in 0 until below.length) {
+                val e = below.item(i) as org.w3c.dom.Element
+                val t = e.getAttribute("text").length
+                val d = e.getAttribute("content-desc").length
+                if (t > 0 || d > 0) described++
+                if (i < 80) shapes.append("${e.getAttribute("class").substringAfterLast('.')} ${e.getAttribute("bounds")} t=$t d=$d; ")
+            }
+            log(scenario, "a11y", "total=${all.length} webviewDescendants=${below.length} described=$described")
+            log(scenario, "a11yShape", shapes)
+        } catch (e: Exception) {
+            log(scenario, "a11y", "failed: ${e.javaClass.simpleName}")
+        }
     }
 
     @Test
