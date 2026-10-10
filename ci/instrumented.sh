@@ -52,15 +52,52 @@ declare -A CLASSES=(
   [W1]="W1NotifyTest" [W2]="W2TapNotificationTest" [W3]="W3SeedOnTest W3SeedOffTest W3ToggleTest" [W4]="W4PermissionOffTest"
   [O1]="O1SetupToOnboardingTest O1MainStartShowsOnboardingTest O1ButtonsTest O1StartTest O1WatchNotificationTest"
   [O2]="O2PermissionRequestTest"
+  [U1]="U1UpgradePathTest U2SettingsChangeTest"
   [Sstore]="SStoreWriteTest SStoreReadTest" [Scookie]="SCookieWipeTest"
 )
-FULL_ORDER="L1 L2 L3 L4 G1 A1 A2 F1 F2 F3 F4 F5 F6 C1 C2 C3 C4 C5 R1 W1 W2 W3 W4 O1 O2 Sstore Scookie"
-SUBSET_ORDER="F5 F6 W1 W2 W3 W4 O1"
+FULL_ORDER="L1 L2 L3 L4 G1 A1 A2 F1 F2 F3 F4 F5 F6 C1 C2 C3 C4 C5 R1 W1 W2 W3 W4 O1 O2 U1 Sstore Scookie"
+SUBSET_ORDER="F5 F6 W1 W2 W3 W4 O1 U1"
 if [ "$API" = "34" ]; then ALLOWED="$FULL_ORDER"; else ALLOWED="$SUBSET_ORDER"; fi
 
 selected() {
   [[ " $ALLOWED " == *" $1 "* ]] || return 1
   [ -z "${QA_PHASES:-}" ] || [[ " $QA_PHASES " == *" $1 "* ]]
+}
+
+# A wedged phase (test started, then nothing until the limit): before anything is killed, say whether the
+# app's main thread or the instrumentation thread is stuck. The instrumentation runs inside the app
+# process, so one SIGQUIT thread dump covers both. Printed to the job log only (never an artifact):
+# thread names, states and the top three frames, no strings, no page content. Every step is bounded.
+hang_diagnostics() {
+  local cls="$1" pid trace
+  echo "--- hang diagnostics for $cls (thread names/states and top frames only)"
+  pid=$(timeout 20 adb shell pidof "$PKG" 2>/dev/null | tr -d '\r' | awk '{print $1}')
+  if [ -z "$pid" ]; then
+    echo "app process is gone (pidof empty): the app died, it did not hang"
+    timeout 30 adb logcat -d -b events -s am_proc_died am_kill am_crash am_anr 2>/dev/null | tail -n 5 | cut -c1-160
+    return 0
+  fi
+  echo "app pid present"
+  timeout 30 adb shell dumpsys activity processes 2>/dev/null | tr -d '\r' \
+    | grep -E "ProcessRecord\{.*$PKG|curProcState=|isForeground|ANR|notResponding" | cut -c1-160 | head -n 8
+  timeout 30 adb shell dumpsys activity activities 2>/dev/null | tr -d '\r' \
+    | grep -o -E 'ResumedActivity: ActivityRecord\{[^ ]+ u0 [^ ]+' | sed -E 's/.* u0 //' | head -n 2
+  # SIGQUIT needs root for an app uid; the ART thread dump lands in /data/anr (readable as root).
+  if wait_until 45 adb root >/dev/null 2>&1 && wait_until 30 is_root; then
+    timeout 20 adb shell kill -3 "$pid" >/dev/null 2>&1 || true
+    anr_new() { timeout 20 adb shell "ls -t /data/anr/anr_* 2>/dev/null | head -n 1" 2>/dev/null | tr -d '\r' | grep -q anr_; }
+    wait_until 20 anr_new || echo "no /data/anr trace file appeared"
+    trace=$(timeout 20 adb shell "ls -t /data/anr/anr_* 2>/dev/null | head -n 1" 2>/dev/null | tr -d '\r')
+    if [ -n "$trace" ]; then
+      timeout 60 adb shell cat "$trace" 2>/dev/null | tr -d '\r' | awk '
+        /^"/ { print; k = 0; next }
+        /^  (at |native: )/ { if (k < 3) print; k++ }' | cut -c1-200 | head -n 400
+    fi
+    unroot
+  else
+    echo "adb root unavailable: no thread dump taken"
+  fi
+  echo "--- end hang diagnostics"
 }
 
 # One instrumentation phase: the output must contain `OK (`; the exit code alone proves nothing.
@@ -75,6 +112,7 @@ run_phase() {
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
     echo "phase $cls hit the ${PHASE_TIMEOUT}s limit (rc=$rc); device state: $(timeout 20 adb get-state 2>&1 | tr -d '\r\n')"
     timeout 20 adb devices | tee -a "$out"
+    hang_diagnostics "$cls"
   fi
   # Facts the tests log on purpose (tag QaFail), kept for passing phases too.
   timeout 60 adb logcat -d -s QaFail 2>/dev/null | grep -v '^---' >"$OUT/$cls-facts.txt" || true
