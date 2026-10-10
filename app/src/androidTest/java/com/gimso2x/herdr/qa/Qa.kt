@@ -279,6 +279,9 @@ object Qa {
 
     fun currentUrl(): String? = onMain { webViewUnsafe()?.url }
 
+    /** Whether the app's WebView has a history entry to go back to; null without a WebView. */
+    fun canGoBack(): Boolean? = onMain { webViewUnsafe()?.canGoBack() }
+
     fun reload() = onMain { webViewUnsafe()!!.reload() }
 
     /** Loads [url] straight into the app's WebView (diagnostics: a direct URL, not the deep link). */

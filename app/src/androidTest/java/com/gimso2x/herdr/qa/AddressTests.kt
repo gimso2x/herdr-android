@@ -177,4 +177,58 @@ class U2SettingsChangeTest {
             b.stop()
         }
     }
+
+    /**
+     * A live MainActivity on origin A, address changed to B (a different host: cookies are per host)
+     * in Settings: coming back must show B's root, no way back to A, no cookie of A sent to B and
+     * nothing sent to A after the change.
+     */
+    @Test
+    fun openMainReloadsOnTheNewServer() {
+        val a = pageFixture().start(override = false)
+        val b = pageFixture().start(override = false, host = "localhost")
+        try {
+            Qa.resetState(alerts = false, token = Qa.syntheticToken(), server = a.base)
+            Qa.setOnboarding(done = true, asked = true)
+            val aHost = java.net.URI(a.base).authority
+            val bHost = java.net.URI(b.base).authority
+            ActivityScenario.launch(MainActivity::class.java).use {
+                Qa.awaitHost(aHost, 60_000)
+                assertTrue(a.count("/") >= 1)
+                val seenA = a.log.size
+
+                ActivityScenario.launch(SettingsActivity::class.java).use {
+                    val field = Qa.device.wait(Until.findObject(By.clazz("android.widget.EditText")), 30_000)
+                    assertNotNull(field)
+                    field.text = b.base
+                    val change = Qa.device.wait(Until.findObject(By.text("주소 바꾸기").enabled(true)), 30_000)
+                    assertNotNull("change button never enabled", change)
+                    change.click()
+                    Qa.until(60_000, "new address stored", { "health=${b.healthRequests()}" }) {
+                        Qa.app.tokenStore.getServer() == b.base && b.healthRequests() >= 1
+                    }
+                }
+
+                Qa.awaitHost(bHost, 60_000)
+                assertEquals("${b.base}/", Qa.currentUrl())
+                Qa.until(30_000, "history cleared", { "url=${Qa.currentUrl()} canGoBack=${Qa.canGoBack()}" }) {
+                    Qa.canGoBack() == false
+                }
+                // The old document is gone and nothing reached A after the change.
+                assertEquals("nothing may be sent to A after the change", seenA, a.log.size)
+                val pageRequests = b.log.filter { it.path.orEmpty().substringBefore('?') == "/" }
+                assertTrue("B never served its root", pageRequests.isNotEmpty())
+                for (request in b.log) {
+                    assertFalse(
+                        "a cookie of A reached B: ${request.path}",
+                        request.getHeader("Cookie").orEmpty().let { cookie -> a.issued.any { cookie.contains(it) } },
+                    )
+                }
+                assertEquals(bHost, java.net.URI(Qa.currentUrl()!!).authority)
+            }
+        } finally {
+            a.stop()
+            b.stop()
+        }
+    }
 }

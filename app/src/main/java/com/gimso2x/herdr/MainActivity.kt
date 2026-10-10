@@ -113,6 +113,10 @@ class MainActivity : ComponentActivity() {
     /** Pane URL delivered (intent) before the first load; wins over restored history. */
     private var pendingPaneUrl: String? = null
     private var recovering = false
+
+    /** Origin the WebView document was loaded from; a different configured origin forces a reset. */
+    private var loadedOrigin: String? = null
+    private var clearHistoryOnFinish = false
     private var setupOpened = false
 
     /** A failure sent the owner to setup; reload the last page when setup comes back with a token. */
@@ -231,6 +235,7 @@ class MainActivity : ComponentActivity() {
                 // Every resume renews if due, independent of alerts; then sleep until the next due time.
                 val first = RefreshOutcome.of(app.accessSession.ensureFresh())
                 if (first is RefreshOutcome.Fresh) setupOpened = false
+                resetIfOriginChanged()
                 val failure = (first as? RefreshOutcome.NeedsSetup) ?: scheduler.run()
                 // Once per failure episode: backing out of setup must not bounce straight back into it.
                 if (!setupOpened) openSetup(failure.error)
@@ -344,6 +349,10 @@ class MainActivity : ComponentActivity() {
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
+                if (clearHistoryOnFinish && url != null && policy.isInApp(url)) {
+                    clearHistoryOnFinish = false
+                    view.clearHistory()
+                }
                 keepSplash = false
                 // The Compose host holds the initial focus; without view focus the page reports
                 // document.hasFocus() == false (clipboard writes are refused, the keyboard may not show).
@@ -364,11 +373,31 @@ class MainActivity : ComponentActivity() {
 
     private fun rootUrl(): String = "${HerdrConfig.baseUrl}/"
 
-    private fun lastUrl(): String = lastHerdrUrl ?: rootUrl()
+    private fun lastUrl(): String = lastHerdrUrl?.takeIf { policy.isInApp(it) } ?: rootUrl()
 
     private fun retry() {
-        startUrl = lastHerdrUrl
+        startUrl = lastHerdrUrl?.takeIf { policy.isInApp(it) }
         startFlow()
+    }
+
+    /**
+     * The address was changed while this activity was alive: forget everything of the old origin
+     * (document, history, pending URLs) and load the root of the new one.
+     */
+    private fun resetIfOriginChanged() {
+        val loaded = loadedOrigin ?: return
+        val now = HerdrConfig.baseUrlOrNull ?: return
+        if (now == loaded) return
+        loadedOrigin = now
+        pendingState = null
+        pendingStartUrl = null
+        pendingPaneUrl = null
+        startUrl = null
+        lastHerdrUrl = null
+        reloadAfterSetup = false
+        clearHistoryOnFinish = true
+        webView.clearHistory()
+        webView.loadUrl(rootUrl())
     }
 
     /** No token or no server address -> setup; else a fresh session, then restore the saved page or load [startUrl]. */
@@ -405,6 +434,7 @@ class MainActivity : ComponentActivity() {
 
     private fun loadInitialPage() {
         val saved = pendingState
+        loadedOrigin = HerdrConfig.baseUrlOrNull
         val plan = StartupNavigation.resolve(
             hasPendingState = saved != null,
             pendingStartUrl = pendingStartUrl,

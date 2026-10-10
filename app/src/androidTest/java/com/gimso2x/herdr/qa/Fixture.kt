@@ -49,8 +49,8 @@ class Fixture {
         routes["/api/health"] = { health(it) }
     }
 
-    /** [override] false: only listen (the app learns the address the way a user would enter it). */
-    fun start(override: Boolean = true): Fixture {
+    /** [override] false: only listen (the app learns the address the way a user would enter it). [host] only names the origin. */
+    fun start(override: Boolean = true, host: String = "127.0.0.1"): Fixture {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 log += request
@@ -59,7 +59,7 @@ class Fixture {
             }
         }
         server.start(InetAddress.getByName("127.0.0.1"), 0)
-        base = "http://127.0.0.1:${server.port}"
+        base = "http://$host:${server.port}"
         if (override) HerdrConfig.setDebugBaseUrl(base)
         return this
     }
