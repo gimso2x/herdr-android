@@ -109,7 +109,12 @@ jobs:
       - name: Build the debug and test APKs before the emulator starts
         # Keeps the CPU/RAM-hungry Gradle build away from the booted emulator (ANR dialogs and
         # low-memory kills); ci/instrumented.sh then only has to install the up-to-date outputs.
-        run: ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
+        run: |
+          ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
+          # The Kotlin compile daemon outlives --no-daemon builds; free its RAM for the emulator.
+          pkill -f KotlinCompileDaemon || true
+          ./gradlew --stop
+          free -m
       - name: Free disk space for the emulator userdata partition
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/local/lib/android/sdk/ndk /opt/hostedtoolcache/CodeQL

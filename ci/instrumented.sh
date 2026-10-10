@@ -248,6 +248,9 @@ if ! ./gradlew --no-daemon :app:installDebug :app:installDebugAndroidTest; then
   exit 1
 fi
 
+# The install build leaves a Kotlin daemon behind; the emulator needs that memory.
+pkill -f KotlinCompileDaemon >/dev/null 2>&1 || true
+free -m
 adb push "$TOKEN_FILE" "$DEVICE_TOKEN" >/dev/null || { echo "could not push the qa token"; exit 1; }
 adb shell input keyevent KEYCODE_WAKEUP
 adb shell wm dismiss-keyguard
