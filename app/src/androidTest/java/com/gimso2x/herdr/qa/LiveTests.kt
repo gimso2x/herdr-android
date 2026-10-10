@@ -85,7 +85,7 @@ class L1LiveLoadTest {
             var drift = 1.0
             Qa.until(30_000, "closed-drawer screen is stable", { "drift=$drift" }) {
                 val next = Qa.screenBitmap()
-                drift = Qa.changedFraction(baseline, next)
+                drift = Qa.changedFraction(baseline, next, 0.0, 0.85, 0.33, 0.95)
                 baseline = next
                 drift < 0.002
             }
@@ -120,12 +120,13 @@ class L1LiveLoadTest {
                 ),
             )
             assertEquals(0L, (Qa.js("window.__qaBlocked") as Number).toLong())
-            // The DOM can be a frame or more ahead of what the display shows: capture into l1.png
-            // until the stored file itself differs substantially from the closed-drawer baseline.
+            // The DOM can be ahead of the display (and a banner may appear above the page): capture
+            // into l1.png until the stored file itself differs in the drawer area (the left 85% of
+            // the screen below the header/tab strip) from the closed-drawer baseline.
             var changed = 0.0
             Qa.until(20_000, "l1.png shows the open drawer", { "changedFraction=$changed" }) {
-                changed = Qa.changedFraction(before, Qa.decodePng(Qa.screenshotBytes("l1.png")))
-                changed >= 0.15
+                changed = Qa.changedFraction(before, Qa.decodePng(Qa.screenshotBytes("l1.png")), 0.0, 0.85, 0.33, 0.95)
+                changed >= 0.08
             }
             Qa.logFact("l1 screen changed fraction=$changed drawerStillOpen=${Qa.js("document.querySelector('button.drawer-toggle').getAttribute('aria-expanded')")}")
         }

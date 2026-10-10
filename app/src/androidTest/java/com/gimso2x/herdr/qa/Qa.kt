@@ -154,13 +154,27 @@ object Qa {
         return ParcelFileDescriptor.AutoCloseInputStream(pfd).use { it.readBytes() }
     }
 
-    /** Fraction of pixels (0..1) whose colour differs between two equally sized screenshots. */
-    fun changedFraction(a: android.graphics.Bitmap, b: android.graphics.Bitmap): Double {
+    /**
+     * Fraction of pixels (0..1) that differ between two equally sized screenshots inside the
+     * region [x0,x1) x [y0,y1) given as fractions of the screen.
+     */
+    fun changedFraction(
+        a: android.graphics.Bitmap,
+        b: android.graphics.Bitmap,
+        x0: Double = 0.0,
+        x1: Double = 1.0,
+        y0: Double = 0.0,
+        y1: Double = 1.0,
+    ): Double {
         if (a.width != b.width || a.height != b.height) return 1.0
-        val pa = IntArray(a.width * a.height)
-        val pb = IntArray(b.width * b.height)
-        a.getPixels(pa, 0, a.width, 0, 0, a.width, a.height)
-        b.getPixels(pb, 0, b.width, 0, 0, b.width, b.height)
+        val left = (a.width * x0).toInt()
+        val top = (a.height * y0).toInt()
+        val w = (a.width * x1).toInt() - left
+        val h = (a.height * y1).toInt() - top
+        val pa = IntArray(w * h)
+        val pb = IntArray(w * h)
+        a.getPixels(pa, 0, w, left, top, w, h)
+        b.getPixels(pb, 0, w, left, top, w, h)
         var changed = 0
         for (i in pa.indices) if (pa[i] != pb[i]) changed++
         return changed.toDouble() / pa.size
