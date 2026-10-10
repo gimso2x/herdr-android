@@ -20,7 +20,7 @@ class StatusTrackerTest {
 
     /** One poll at [atSeconds] after the start, with a single pane "p1" unless [samples] is given. */
     private fun poll(atSeconds: Long, status: AgentStatus, paneId: String = "p1"): List<Alert> =
-        poll(atSeconds, listOf(PaneSample(paneId, status, "ws · $paneId")))
+        poll(atSeconds, listOf(PaneSample(paneId, status, "ws", paneId)))
 
     private fun poll(atSeconds: Long, samples: List<PaneSample>): List<Alert> {
         clock.nowMillis = 1_000_000L + atSeconds * 1000
@@ -93,7 +93,7 @@ class StatusTrackerTest {
         poll(0, IDLE)
         poll(10, WORKING)
         clock.nowMillis = 1_000_000L + 10_000 + 59_999
-        assertTrue(tracker.update(listOf(PaneSample("p1", DONE, "ws · p1"))).isEmpty())
+        assertTrue(tracker.update(listOf(PaneSample("p1", DONE, "ws", "p1"))).isEmpty())
     }
 
     @Test

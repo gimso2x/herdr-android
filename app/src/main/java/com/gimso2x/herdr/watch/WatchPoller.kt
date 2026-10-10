@@ -63,7 +63,7 @@ class WatchPoller(
                 context.ensureActive()
                 val body = if (response.code == 200) call.readBody(response) else null
                 context.ensureActive()
-                handle(seq, response.code, body, context)
+                handle(seq, response.code, body, context, cookieHeader)
             }
         } catch (_: IOException) {
             PollResult(seq, PollOutcome.NETWORK)
@@ -98,13 +98,22 @@ class WatchPoller(
         }
     }
 
-    private fun handle(seq: Long, code: Int, body: String?, context: CoroutineContext): PollResult = when (code) {
+    private suspend fun handle(
+        seq: Long,
+        code: Int,
+        body: String?,
+        context: CoroutineContext,
+        cookieHeader: String,
+    ): PollResult = when (code) {
         200 -> {
             val samples = SnapshotParser.parse(body.orEmpty())
             if (samples == null) {
                 PollResult(seq, PollOutcome.PARSE_ERROR)
             } else {
-                val alerts = tracker.update(samples)
+                // One optional read-only GET per alert (5 s cap, failure -> no extra line).
+                val alerts = tracker.update(samples).map {
+                    it.copy(detail = AlertDetail.fetch(client, baseUrl, cookieHeader, it.kind, it.paneId))
+                }
                 context.ensureActive() // never alert once the poll's owner has been stopped
                 if (alerts.isNotEmpty()) onAlerts(alerts)
                 PollResult(seq, PollOutcome.OK, samples.size, alerts.size)

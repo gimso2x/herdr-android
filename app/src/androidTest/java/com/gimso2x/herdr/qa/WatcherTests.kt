@@ -49,6 +49,12 @@ class WatchFixture {
         fx.routes["/api/session"] = {
             MockResponse().setHeader("Content-Type", "application/json").setBody(sessionJson())
         }
+        fx.routes["/api/pane/prompt"] = {
+            MockResponse().setHeader("Content-Type", "application/json").setBody(promptJson())
+        }
+        fx.routes["/api/pane/conversation"] = {
+            MockResponse().setHeader("Content-Type", "application/json").setBody(conversationJson())
+        }
     }
 
     fun start(): WatchFixture {
@@ -62,25 +68,64 @@ class WatchFixture {
 
     private fun sessionJson(): String {
         val panes = JSONArray()
-        for ((id, title) in listOf(PANE_1 to "task one", PANE_2 to "task two")) {
+        for ((id, tab, title) in listOf(Triple(PANE_1, "w1:t1", "task one"), Triple(PANE_2, "w1:t2", "task two"))) {
             panes.put(
                 JSONObject()
                     .put("pane_id", id)
                     .put("workspace_id", "w1")
+                    .put("tab_id", tab)
                     .put("agent_status", states[id])
                     .put("agent", "omp")
                     .put("terminal_title_stripped", title),
             )
         }
-        val workspaces = JSONArray().put(JSONObject().put("workspace_id", "w1").put("label", "qa"))
-        return JSONObject().put("snapshot", JSONObject().put("workspaces", workspaces).put("panes", panes)).toString()
+        val workspaces = JSONArray().put(JSONObject().put("workspace_id", "w1").put("label", "ws-a"))
+        val tabs = JSONArray()
+            .put(JSONObject().put("tab_id", "w1:t1").put("workspace_id", "w1").put("label", "main"))
+            .put(JSONObject().put("tab_id", "w1:t2").put("workspace_id", "w1").put("label", "logs"))
+        return JSONObject()
+            .put("snapshot", JSONObject().put("workspaces", workspaces).put("tabs", tabs).put("panes", panes))
+            .toString()
     }
+
+    /** Shapes of GET /api/pane/prompt and GET /api/pane/conversation (see AlertDetail). */
+    private fun promptJson(): String = JSONObject()
+        .put(
+            "prompt",
+            JSONObject()
+                .put("id", "fixture-prompt")
+                .put("agent", "omp")
+                .put("kind", "question")
+                .put("title", "Fixture")
+                .put("question", "$PROMPT_QUESTION\nsecond line")
+                .put("options", JSONArray()),
+        )
+        .put("suggestion", JSONObject.NULL)
+        .toString()
+
+    private fun conversationJson(): String {
+        val parts = JSONArray()
+            .put(JSONObject().put("kind", "thinking").put("text", "hmm"))
+            .put(JSONObject().put("kind", "text").put("text", "$LAST_ANSWER\nmore"))
+        val turns = JSONArray()
+            .put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("kind", "text").put("text", "go"))))
+            .put(JSONObject().put("role", "assistant").put("parts", parts))
+        return JSONObject().put("source", "omp-transcript").put("turns", turns).put("cursor", JSONObject.NULL).toString()
+    }
+
+    /** Requests the watcher made for alert details: (method, path-with-query). */
+    fun detailRequests(): List<Pair<String, String>> =
+        fx.log.filter { it.path.orEmpty().startsWith("/api/pane/") }.map { it.method.orEmpty() to it.path.orEmpty() }
 
     companion object {
         const val PANE_1 = "w1:p1"
         const val PANE_2 = "w1:p2"
-        const val TITLE_1 = "qa · task one"
-        const val TITLE_2 = "qa · task two"
+        const val TITLE_1 = "ws-a · main"
+        const val TITLE_2 = "ws-a · logs"
+        const val BODY_1 = "omp · task one — 입력이 필요합니다"
+        const val BODY_1_DONE = "omp · task one — 작업을 마쳤습니다"
+        const val PROMPT_QUESTION = "Run the fixture migration?"
+        const val LAST_ANSWER = "Fixture finished the task."
     }
 }
 
@@ -118,6 +163,9 @@ private object Watch {
     fun title(n: StatusBarNotification): String = n.notification.extras.getCharSequence(Notification.EXTRA_TITLE).toString()
 
     fun text(n: StatusBarNotification): String = n.notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString()
+
+    fun bigText(n: StatusBarNotification): String =
+        n.notification.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString()
 
     /** Opens the shade and taps the notification titled [title]. */
     fun tapNotification(title: String) {
@@ -166,7 +214,11 @@ class W1NotifyTest {
                     Watch.notifications.getNotificationChannel(WatchNotifications.CHANNEL_NEEDS_INPUT).importance,
                 )
                 assertEquals(WatchFixture.TITLE_1, Watch.title(needsInput))
-                assertEquals("입력이 필요합니다", Watch.text(needsInput))
+                assertEquals(WatchFixture.BODY_1, Watch.text(needsInput))
+                assertEquals(
+                    "${WatchFixture.BODY_1}\n${WatchFixture.PROMPT_QUESTION}",
+                    Watch.bigText(needsInput),
+                )
 
                 wf.set(WatchFixture.PANE_1, "working")
                 Watch.poll()
@@ -174,7 +226,19 @@ class W1NotifyTest {
                 Watch.poll()
                 val finished = Watch.awaitAlert(WatchNotifications.CHANNEL_FINISHED, WatchFixture.PANE_1)
                 assertEquals(WatchFixture.TITLE_1, Watch.title(finished))
-                assertEquals("작업을 마쳤습니다", Watch.text(finished))
+                assertEquals(WatchFixture.BODY_1_DONE, Watch.text(finished))
+                assertEquals(
+                    "${WatchFixture.BODY_1_DONE}\n${WatchFixture.LAST_ANSWER}",
+                    Watch.bigText(finished),
+                )
+                // Exactly one read-only GET per alert; nothing else touched the pane endpoints.
+                assertEquals(
+                    listOf(
+                        "GET" to "/api/pane/prompt?pane_id=w1%3Ap1",
+                        "GET" to "/api/pane/conversation?pane_id=w1%3Ap1",
+                    ),
+                    wf.detailRequests(),
+                )
             }
         } finally {
             wf.fx.stop()
@@ -242,7 +306,7 @@ private val W3_TOKEN = ServiceToken("qa-w3-id", "qa-w3-secret")
 class W3SeedOnTest {
     @Test
     fun seedAlertsOn() {
-        Qa.resetState(alerts = true, token = W3_TOKEN)
+        Qa.resetState(alerts = true, token = W3_TOKEN, server = Qa.SAMPLE)
         assertNotNull(Qa.app.tokenStore.get())
         assertTrue(AppPreferences(Qa.targetContext).alertsEnabled)
     }
@@ -253,7 +317,7 @@ class W3SeedOnTest {
 class W3SeedOffTest {
     @Test
     fun seedAlertsOff() {
-        Qa.resetState(alerts = false, token = W3_TOKEN)
+        Qa.resetState(alerts = false, token = W3_TOKEN, server = Qa.SAMPLE)
         assertNotNull(Qa.app.tokenStore.get())
         assertFalse(AppPreferences(Qa.targetContext).alertsEnabled)
     }

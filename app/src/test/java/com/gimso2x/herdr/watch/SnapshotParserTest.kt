@@ -27,45 +27,48 @@ class SnapshotParserTest {
             listOf(AgentStatus.WORKING, AgentStatus.WORKING, AgentStatus.WORKING, AgentStatus.DONE),
             samples.map { it.status },
         )
-        assertEquals("work · π Fixture task 1", samples[0].label)
-        assertEquals("ws-b · π Fixture task 2", samples[1].label)
-        assertEquals("work · π Fixture task 4", samples[3].label)
+        assertEquals("ws-a", samples[0].workspace)
+        assertEquals("ws-b", samples[1].workspace)
+        assertEquals("π Fixture task 1", samples[0].title)
+        assertEquals("omp", samples[3].agent)
+        assertEquals("main", samples[0].tab)
+        assertEquals("logs", samples[3].tab)
     }
 
     @Test
-    fun labelFallsBackFromTitleToAgentToPaneId() {
+    fun agentPrefersDisplayNameAndTitleFallsBack() {
         val samples = parse(
             snapshot(
                 """[{"workspace_id":"w1","label":"ws"}]""",
                 """[
-                  {"pane_id":"p1","workspace_id":"w1","agent_status":"idle","agent":"omp","terminal_title_stripped":"Title"},
-                  {"pane_id":"p2","workspace_id":"w1","agent_status":"idle","agent":"omp"},
+                  {"pane_id":"p1","workspace_id":"w1","agent_status":"idle","agent":"omp","display_agent":"Review bot","terminal_title_stripped":"Title","title":"Other"},
+                  {"pane_id":"p2","workspace_id":"w1","agent_status":"idle","agent":"omp","title":"Pane title"},
                   {"pane_id":"p3","workspace_id":"w1","agent_status":"idle"},
-                  {"pane_id":"p4","workspace_id":"w1","agent_status":"idle","agent":"omp","terminal_title_stripped":"  "},
+                  {"pane_id":"p4","workspace_id":"w1","agent_status":"idle","agent":"  ","terminal_title_stripped":"  "},
                   {"pane_id":"p5","workspace_id":"w1","agent_status":"idle","agent":null,"terminal_title_stripped":null}
                 ]""",
             ),
         )
-        assertEquals(
-            listOf("ws · Title", "ws · omp", "ws · p3", "ws · omp", "ws · p5"),
-            samples.map { it.label },
-        )
+        assertEquals(listOf("Review bot", "omp", null, null, null), samples.map { it.agent })
+        assertEquals(listOf("Title", "Pane title", null, null, null), samples.map { it.title })
+        assertEquals(listOf("ws", "ws", "ws", "ws", "ws"), samples.map { it.workspace })
     }
 
     @Test
-    fun noWorkspacePrefixWhenWorkspaceIsUnknownOrUnlabelled() {
+    fun missingWorkspaceOrTabLabelsAreNull() {
         val samples = parse(
             snapshot(
                 """[{"workspace_id":"w1"},{"label":"orphan"},{"workspace_id":"w3","label":null}]""",
                 """[
-                  {"pane_id":"p1","workspace_id":"w1","agent_status":"idle","agent":"a"},
-                  {"pane_id":"p2","workspace_id":"zzz","agent_status":"idle","agent":"b"},
-                  {"pane_id":"p3","agent_status":"idle","agent":"c"},
-                  {"pane_id":"p4","workspace_id":"w3","agent_status":"idle","agent":"d"}
+                  {"pane_id":"p1","workspace_id":"w1","tab_id":"t9","agent_status":"idle"},
+                  {"pane_id":"p2","workspace_id":"zzz","agent_status":"idle"},
+                  {"pane_id":"p3","agent_status":"idle"},
+                  {"pane_id":"p4","workspace_id":"w3","agent_status":"idle"}
                 ]""",
             ),
         )
-        assertEquals(listOf("a", "b", "c", "d"), samples.map { it.label })
+        assertEquals(listOf(null, null, null, null), samples.map { it.workspace })
+        assertEquals(listOf(null, null, null, null), samples.map { it.tab })
     }
 
     @Test
@@ -126,10 +129,11 @@ class SnapshotParserTest {
     fun missingOrMalformedWorkspacesStillYieldPanes() {
         for (workspaces in listOf("null", "{}", "\"x\"", "[1,\"a\",null]")) {
             val samples = parse(snapshot(workspaces, """[{"pane_id":"p","agent_status":"idle","agent":"a"}]"""))
-            assertEquals(workspaces, listOf("a"), samples.map { it.label })
+            assertEquals(workspaces, listOf("a"), samples.map { it.agent })
+            assertEquals(workspaces, listOf<String?>(null), samples.map { it.workspace })
         }
         val noWorkspaces = parse("""{"snapshot":{"panes":[{"pane_id":"p","agent_status":"idle"}]}}""")
-        assertEquals(listOf("p"), noWorkspaces.map { it.label })
+        assertEquals(listOf("p"), noWorkspaces.map { it.paneId })
     }
 
     @Test

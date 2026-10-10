@@ -29,14 +29,29 @@ object SnapshotParser {
             }
         }
 
+        val tabLabels = HashMap<String, String>()
+        val tabs = snapshot.optJSONArray("tabs")
+        if (tabs != null) {
+            for (i in 0 until tabs.length()) {
+                val tab = tabs.optJSONObject(i) ?: continue
+                val id = tab.text("tab_id") ?: continue
+                val label = tab.text("label") ?: continue
+                tabLabels[id] = label
+            }
+        }
+
         val samples = ArrayList<PaneSample>(panes.length())
         for (i in 0 until panes.length()) {
             val pane = panes.optJSONObject(i) ?: continue
             val paneId = pane.text("pane_id") ?: continue
-            val base = pane.text("terminal_title_stripped") ?: pane.text("agent") ?: paneId
-            val workspace = pane.text("workspace_id")?.let { workspaceLabels[it] }
-            val label = if (workspace != null) "$workspace · $base" else base
-            samples += PaneSample(paneId, AgentStatus.parse(pane.text("agent_status")), label)
+            samples += PaneSample(
+                paneId = paneId,
+                status = AgentStatus.parse(pane.text("agent_status")),
+                workspace = pane.text("workspace_id")?.let { workspaceLabels[it] },
+                tab = pane.text("tab_id")?.let { tabLabels[it] },
+                agent = pane.text("display_agent") ?: pane.text("agent"),
+                title = pane.text("terminal_title_stripped") ?: pane.text("title"),
+            )
         }
         return samples
     }

@@ -74,6 +74,7 @@ object WatchNotifications {
                 .setSmallIcon(android.R.drawable.stat_notify_chat)
                 .setContentTitle(alert.title)
                 .setContentText(alert.body)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(alert.bigText))
                 .setContentIntent(openApp(context, alert.paneId))
                 .setAutoCancel(true)
                 .setPriority(

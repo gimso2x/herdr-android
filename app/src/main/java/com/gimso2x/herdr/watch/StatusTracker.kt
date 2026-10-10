@@ -33,13 +33,13 @@ class StatusTracker(private val clock: Clock = Clock.SYSTEM) {
             if (sample.status.busy) {
                 if (!previous.busy) state.turnStart = now
                 if (sample.status == AgentStatus.BLOCKED && previous != AgentStatus.BLOCKED) {
-                    alerts += Alert(sample.paneId, AlertKind.NEEDS_INPUT, sample.label, BODY_NEEDS_INPUT)
+                    alerts += Alert(sample.paneId, AlertKind.NEEDS_INPUT, sample)
                 }
             } else if (previous.busy) {
                 val start = state.turnStart
                 state.turnStart = null
                 if (start != null && now - start >= MIN_TURN_MILLIS) {
-                    alerts += Alert(sample.paneId, AlertKind.FINISHED, sample.label, BODY_FINISHED)
+                    alerts += Alert(sample.paneId, AlertKind.FINISHED, sample)
                 }
             }
             state.last = sample.status
@@ -52,7 +52,5 @@ class StatusTracker(private val clock: Clock = Clock.SYSTEM) {
 
     companion object {
         const val MIN_TURN_MILLIS = 60_000L
-        const val BODY_NEEDS_INPUT = "입력이 필요합니다"
-        const val BODY_FINISHED = "작업을 마쳤습니다"
     }
 }

@@ -179,6 +179,55 @@ class WatchPollerTest {
         }
     }
 
+    private fun routedClient(requests: MutableList<String>, detailOk: Boolean): OkHttpClient =
+        OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val request = chain.request()
+                requests += "${request.method} ${request.url.encodedPath}${request.url.query?.let { "?$it" }.orEmpty()}"
+                val json = when (request.url.encodedPath) {
+                    "/api/pane/prompt" -> """{"prompt":{"question":"Apply the fixture migration?\nsecond line","title":"t"},"suggestion":null}"""
+                    "/api/pane/conversation" -> "{}"
+                    else -> BLOCKED_BODY
+                }
+                Response.Builder()
+                    .request(request)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(if (!detailOk && request.url.encodedPath != "/api/session") 500 else 200)
+                    .message("x")
+                    .body(json.toResponseBody("application/json".toMediaType()))
+                    .build()
+            }
+            .build()
+
+    @Test
+    fun blockedAlertCarriesThePromptQuestionFromOneGet() = runBlocking {
+        release.countDown()
+        val requests = CopyOnWriteArrayList<String>()
+        val routed = routedClient(requests, true)
+        poller(routed).pollOnce()
+        assertEquals(
+            listOf("GET /api/session", "GET /api/pane/prompt?pane_id=w1%3Ap1"),
+            requests.toList(),
+        )
+        val alert = alerts.single()
+        assertEquals("Apply the fixture migration?", alert.detail)
+        assertEquals("pi — 입력이 필요합니다\nApply the fixture migration?", alert.bigText)
+        routed.dispatcher.executorService.shutdown()
+    }
+
+    @Test
+    fun failedDetailRequestOmitsTheLineButStillAlerts() = runBlocking {
+        release.countDown()
+        val requests = CopyOnWriteArrayList<String>()
+        val routed = routedClient(requests, false)
+        poller(routed).pollOnce()
+        assertEquals(2, requests.size)
+        val alert = alerts.single()
+        assertEquals(null, alert.detail)
+        assertEquals("pi — 입력이 필요합니다", alert.bigText)
+        routed.dispatcher.executorService.shutdown()
+    }
+
     private suspend fun awaitLatch(latch: CountDownLatch): Boolean =
         withContext(Dispatchers.IO) { latch.await(10, TimeUnit.SECONDS) }
 
