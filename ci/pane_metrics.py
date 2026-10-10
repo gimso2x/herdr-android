@@ -2,6 +2,7 @@
 """Pane-area metrics of the released app from a uiautomator dump and a screenshot (stdlib only).
 
 usage: pane_metrics.py <ui.xml> <screenshot.png> [--shape]
+       pane_metrics.py --screen <screenshot.png>
 
 The release APK has no devtools, so the DOM cannot be read. What the smoke can see is the Android
 accessibility tree of the WebView (bounds) and the pixels. A pane area exists when some node under
@@ -88,7 +89,16 @@ def ink_fraction(png, rect):
     return 1.0 - counts.most_common(1)[0][1] / total
 
 
+def screen_ink(png_path):
+    """Whole-screen ink fraction (failure facts: is anything drawn at all?)."""
+    png = decode_png(open(png_path, "rb").read())
+    print("screen-ink: width=%d height=%d ink_fraction=%.4f" % (png[0], png[1], ink_fraction(png, (0, 0, png[0], png[1]))))
+    return 0
+
+
 def main():
+    if sys.argv[1] == "--screen":
+        return screen_ink(sys.argv[2])
     ui_path, png_path = sys.argv[1], sys.argv[2]
     shape = "--shape" in sys.argv[3:]
     try:

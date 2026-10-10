@@ -49,6 +49,8 @@ failure_facts() {
   echo "--- failure facts"
   grep -o -E 'ResumedActivity: ActivityRecord\{[^ ]+ u0 [^ ]+' <<<"$acts" | sed -E 's/.* u0 //' | sed -n 1p
   grep -o -E 'net::ERR_[A-Z_]+|FATAL EXCEPTION|ANR in [A-Za-z.]+|Choreographer: Skipped [0-9]+ frames' <<<"$log" | sort | uniq -c
+  adb exec-out screencap -p >"$TMP/fail.png" 2>/dev/null && python3 ci/pane_metrics.py --screen "$TMP/fail.png" || true
+  dumpui && echo "a11y nodes in the dump: $(grep -o '<node ' "$TMP/ui.xml" | wc -l)"
   echo "---"
 }
 
