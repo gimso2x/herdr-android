@@ -133,11 +133,23 @@ object Qa {
         shell("screencap -p /sdcard/Download/qa/$name")
     }
 
-    /** The display as it is composited right now (the DOM can be ahead of the screen by a frame or more). */
-    fun screenBitmap(): android.graphics.Bitmap {
+    /** PNG bytes of the display as it is composited right now (the DOM can be ahead of the screen). */
+    fun screenPng(): ByteArray {
         val pfd = instr.uiAutomation.executeShellCommand("screencap -p")
-        val bytes = ParcelFileDescriptor.AutoCloseInputStream(pfd).use { it.readBytes() }
-        return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: throw AssertionError("screencap produced no image")
+        return ParcelFileDescriptor.AutoCloseInputStream(pfd).use { it.readBytes() }
+    }
+
+    fun decodePng(bytes: ByteArray): android.graphics.Bitmap =
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: throw AssertionError("screencap produced no image")
+
+    fun screenBitmap(): android.graphics.Bitmap = decodePng(screenPng())
+
+    /** Stores exactly [bytes] as /sdcard/Download/qa/[name] (the file the harness pulls). */
+    fun savePng(name: String, bytes: ByteArray) {
+        shell("mkdir -p /sdcard/Download/qa")
+        val fds = instr.uiAutomation.executeShellCommandRw("sh -c 'cat > /sdcard/Download/qa/$name'")
+        ParcelFileDescriptor.AutoCloseOutputStream(fds[1]).use { it.write(bytes) }
+        ParcelFileDescriptor.AutoCloseInputStream(fds[0]).use { it.readBytes() }
     }
 
     /** Fraction of pixels (0..1) whose colour differs between two equally sized screenshots. */

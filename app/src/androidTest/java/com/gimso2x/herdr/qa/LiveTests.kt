@@ -80,7 +80,16 @@ class L1LiveLoadTest {
             // Open the workspace list drawer with a real tap (a client-side toggle, nothing is
             // sent), unless the page already shows it open (a tap would close it), then wait for
             // the first workspace label element to be laid out inside the viewport.
-            val before = Qa.screenBitmap()
+            // Closed-drawer baseline: two consecutive captures that agree (the page has stopped moving).
+            var baseline = Qa.screenBitmap()
+            var drift = 1.0
+            Qa.until(30_000, "closed-drawer screen is stable", { "drift=$drift" }) {
+                val next = Qa.screenBitmap()
+                drift = Qa.changedFraction(baseline, next)
+                baseline = next
+                drift < 0.002
+            }
+            val before = baseline
             if (Qa.js("document.querySelector('button.drawer-toggle').getAttribute('aria-expanded') === 'true'") != true) {
                 Qa.tap("button.drawer-toggle")
             }
@@ -111,15 +120,18 @@ class L1LiveLoadTest {
                 ),
             )
             assertEquals(0L, (Qa.js("window.__qaBlocked") as Number).toLong())
-            // The DOM can be a frame or more ahead of what the display shows: capture only once
-            // the composited screen differs substantially from the closed-drawer baseline.
+            // The DOM can be a frame or more ahead of what the display shows: keep only a frame
+            // whose pixels differ substantially from the closed-drawer baseline, and store exactly
+            // that frame (not a second capture).
             var changed = 0.0
+            var frame = ByteArray(0)
             Qa.until(20_000, "screen shows the open drawer", { "changedFraction=$changed" }) {
-                changed = Qa.changedFraction(before, Qa.screenBitmap())
+                frame = Qa.screenPng()
+                changed = Qa.changedFraction(before, Qa.decodePng(frame))
                 changed >= 0.15
             }
-            Qa.logFact("l1 screen changed fraction=$changed")
-            Qa.screenshot("l1.png")
+            Qa.logFact("l1 screen changed fraction=$changed drawerStillOpen=${Qa.js("document.querySelector('button.drawer-toggle').getAttribute('aria-expanded')")}")
+            Qa.savePng("l1.png", frame)
         }
     }
 }
