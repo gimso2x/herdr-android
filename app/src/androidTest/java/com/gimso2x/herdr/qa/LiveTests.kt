@@ -71,8 +71,11 @@ class L1LiveLoadTest {
                     "inText=${Qa.js("document.body.textContent.toLowerCase().indexOf($quoted) >= 0")}"
             }
             assertEquals(0L, (Qa.js("window.__qaBlocked") as Number).toLong())
-            val rewritten = (Qa.js("window.__qaRoleRewritten") as Number).toLong()
-            assertTrue("guard saw no role frame rewritten to observe", rewritten >= 1)
+            // The label can come from the HTTP session load before the socket opens: wait (bounded)
+            // for the guard to see the client's role frame instead of reading the counter once.
+            Qa.until(20_000, "guard saw a role frame rewritten to observe", { "rewritten=${Qa.js("window.__qaRoleRewritten")}" }) {
+                (Qa.js("window.__qaRoleRewritten") as? Number)?.toLong()?.let { it >= 1 } == true
+            }
 
             // Open the workspace list drawer with a real tap (a client-side toggle, nothing is
             // sent), unless the page already shows it open (a tap would close it), then wait for
