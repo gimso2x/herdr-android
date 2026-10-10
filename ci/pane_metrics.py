@@ -1,37 +1,39 @@
 #!/usr/bin/env python3
-"""Pane-area metrics of the released app from a uiautomator dump and a screenshot (stdlib only).
+"""Pane-area metrics of the released app from a screenshot (stdlib only).
 
-usage: pane_metrics.py <ui.xml> <screenshot.png> [--shape]
-       pane_metrics.py --screen <screenshot.png>
+usage: pane_metrics.py <screenshot.png>        pane metrics, exit 0 when the pane area is visible
+       pane_metrics.py --screen <screenshot.png>   whole-screen ink fraction only (failure facts)
 
-The release APK has no devtools, so the DOM cannot be read. What the smoke can see is the Android
-accessibility tree of the WebView (bounds) and the pixels. A pane area exists when some node under
-the WebView is tall (> MIN_HEIGHT px) and wide, is not the page-level container, and its rectangle is
-not blank: more than MIN_INK of its screenshot pixels differ from its most common colour (terminal rows
-or chat messages are drawn there). Prints counts and booleans only, never text or pixels; --shape adds
-one `class bounds text-length desc-length` line per WebView descendant (lengths only).
-Exit 0 when the pane area is visible and not blank, 1 when not, 2 on a malformed input.
+The release APK has no devtools and uiautomator cannot dump a page whose terminal never idles (its
+cursor blinks: "could not get idle state"), so the pane area is judged from the pixels, which is also
+what the v0.1.0/v0.1.1 bug was about (header, banner and tabs drawn over a blank pane area):
+
+  * background_dark:  the most common colour below the header is dark (herdr's dark theme; Cloudflare's
+                      login page and an unloaded WebView are light/white).
+  * pane_extent_px:   vertical distance between the first and the last pixel row below the header
+                      band (0.2 of the screen height) that holds ink, i.e. pixels that differ from the
+                      most common colour. With a blank pane area only the key bar/tabs remain (< 100 px).
+  * band_ink:         fraction of ink in the band 0.375..0.85 of the screen height, where terminal rows or
+                      chat messages sit and where nothing but a blank area sits when the pane has no height.
+
+pane_visible = pane_extent_px > 100, pane_non_blank = band_ink > 0.002. Counts and booleans only: no
+pixel values and no text are printed. Exit 0 when the pane is visible, not blank and the page is dark,
+1 when not, 2 on an unreadable screenshot.
 """
 import collections
-import re
 import struct
 import sys
-import xml.etree.ElementTree as ET
 import zlib
 
-MIN_HEIGHT = 100
-MIN_WIDTH = 200
+MIN_EXTENT = 100
 MIN_INK = 0.002
-PAGE_CONTAINER_FRACTION = 0.9
-
-
-def box(node):
-    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
-    return tuple(map(int, m.groups())) if m else None
+HEADER_FRACTION = 0.2
+BAND = (0.375, 0.85)
+DARK_LUMA = 90
 
 
 def decode_png(data):
-    """RGB(A) 8-bit non-interlaced PNG -> (width, height, rows of (r, g, b) tuples as bytes triples)."""
+    """8-bit non-interlaced RGB(A) PNG -> (width, height, bytes per pixel, rows of bytes)."""
     if data[:8] != b"\x89PNG\r\n\x1a\n":
         raise ValueError("not a PNG")
     pos, idat, header = 8, b"", None
@@ -74,64 +76,50 @@ def decode_png(data):
     return width, height, bpp, rows
 
 
-def ink_fraction(png, rect):
-    width, height, bpp, rows = png
-    x1, y1, x2, y2 = rect
-    x1, y1, x2, y2 = max(0, x1), max(0, y1), min(width, x2), min(height, y2)
-    if x2 <= x1 or y2 <= y1:
-        return 0.0
+def region_stats(png, y1, y2):
+    """(dominant colour, [ink pixel count per row]) over rows y1..y2-1, full width."""
+    width, _, bpp, rows = png
     counts = collections.Counter()
     for y in range(y1, y2):
         row = rows[y]
-        for x in range(x1, x2):
+        for x in range(width):
             counts[row[x * bpp:x * bpp + 3]] += 1
-    total = sum(counts.values())
-    return 1.0 - counts.most_common(1)[0][1] / total
-
-
-def screen_ink(png_path):
-    """Whole-screen ink fraction (failure facts: is anything drawn at all?)."""
-    png = decode_png(open(png_path, "rb").read())
-    print("screen-ink: width=%d height=%d ink_fraction=%.4f" % (png[0], png[1], ink_fraction(png, (0, 0, png[0], png[1]))))
-    return 0
+    dominant = counts.most_common(1)[0][0]
+    ink_per_row = []
+    for y in range(y1, y2):
+        row = rows[y]
+        ink_per_row.append(sum(1 for x in range(width) if row[x * bpp:x * bpp + 3] != dominant))
+    return dominant, ink_per_row
 
 
 def main():
-    if sys.argv[1] == "--screen":
-        return screen_ink(sys.argv[2])
-    ui_path, png_path = sys.argv[1], sys.argv[2]
-    shape = "--shape" in sys.argv[3:]
-    try:
-        root = ET.parse(ui_path).getroot()
-        png = decode_png(open(png_path, "rb").read())
-    except Exception as error:  # malformed input: say so without echoing content
-        print("pane-metrics: unreadable input (%s)" % type(error).__name__)
+    if len(sys.argv) < 2:
+        print("usage: pane_metrics.py [--screen] <screenshot.png>")
         return 2
-    webviews = [n for n in root.iter("node") if n.get("class") == "android.webkit.WebView"]
-    if not webviews:
-        print("pane-metrics: no WebView node")
-        return 1
-    wv = webviews[0]
-    wvbox = box(wv)
-    wv_height = wvbox[3] - wvbox[1]
-    below = [d for d in wv.iter("node") if d is not wv and box(d)]
-    tall = []
-    for d in below:
-        x1, y1, x2, y2 = box(d)
-        if y2 - y1 > MIN_HEIGHT and x2 - x1 >= MIN_WIDTH and (y2 - y1) < PAGE_CONTAINER_FRACTION * wv_height:
-            tall.append(d)
-        if shape:
-            print("shape %s [%d,%d][%d,%d] t=%d d=%d" % (d.get("class"), x1, y1, x2, y2, len(d.get("text", "")), len(d.get("content-desc", ""))))
-    best_ink, best_height = 0.0, 0
-    for d in tall:
-        rect = box(d)
-        ink = ink_fraction(png, rect)
-        if ink > best_ink:
-            best_ink, best_height = ink, rect[3] - rect[1]
-    ok = bool(tall) and best_ink > MIN_INK
-    print("pane-metrics: webview_nodes=%d tall_nodes=%d tall_with_ink_height=%d ink_fraction=%.4f pane_visible=%s pane_non_blank=%s" % (
-        len(below), len(tall), best_height, best_ink, str(bool(tall)).lower(), str(best_ink > MIN_INK).lower()))
-    return 0 if ok else 1
+    screen_only = sys.argv[1] == "--screen"
+    path = sys.argv[-1]
+    try:
+        png = decode_png(open(path, "rb").read())
+    except Exception as error:  # say what failed, never echo content
+        print("pane-metrics: unreadable screenshot (%s)" % type(error).__name__)
+        return 2
+    width, height = png[0], png[1]
+    if screen_only:
+        _, ink = region_stats(png, 0, height)
+        print("screen-ink: width=%d height=%d ink_fraction=%.4f" % (width, height, sum(ink) / (width * height)))
+        return 0
+    top = int(height * HEADER_FRACTION)
+    dominant, ink = region_stats(png, top, height)
+    luma = (299 * dominant[0] + 587 * dominant[1] + 114 * dominant[2]) // 1000
+    inked_rows = [i for i, n in enumerate(ink) if n > 0]
+    extent = (inked_rows[-1] - inked_rows[0] + 1) if inked_rows else 0
+    b1, b2 = int(height * BAND[0]) - top, int(height * BAND[1]) - top
+    band = ink[b1:b2]
+    band_ink = sum(band) / (width * len(band))
+    visible, non_blank, dark = extent > MIN_EXTENT, band_ink > MIN_INK, luma < DARK_LUMA
+    print("pane-metrics: pane_extent_px=%d band_ink=%.4f background_dark=%s pane_visible=%s pane_non_blank=%s" % (
+        extent, band_ink, str(dark).lower(), str(visible).lower(), str(non_blank).lower()))
+    return 0 if (visible and non_blank and dark) else 1
 
 
 if __name__ == "__main__":

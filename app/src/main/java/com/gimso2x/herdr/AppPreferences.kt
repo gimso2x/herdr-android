@@ -20,9 +20,18 @@ class AppPreferences(context: Context) {
             prefs.edit().putBoolean(KEY_NOTIFICATION_ASKED, value).apply()
         }
 
+    /** Whether the first-run onboarding checklist was finished ("시작하기"). */
+    var onboardingDone: Boolean
+        get() = prefs.getBoolean(KEY_ONBOARDING_DONE, false)
+        set(value) {
+            // commit(): the next launch (or a force-stop right after) must see it.
+            prefs.edit().putBoolean(KEY_ONBOARDING_DONE, value).commit()
+        }
+
     private companion object {
         const val FILE = "herdr_prefs"
         const val KEY_ALERTS_ENABLED = "alerts_enabled"
         const val KEY_NOTIFICATION_ASKED = "notification_permission_asked"
+        const val KEY_ONBOARDING_DONE = "onboarding_done"
     }
 }
