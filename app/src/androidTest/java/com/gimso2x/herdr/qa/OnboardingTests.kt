@@ -129,7 +129,8 @@ private object Ob {
             fun attr(name: String) = Regex("$name=\"([^\"]*)\"").find(node.value)?.groupValues?.get(1).orEmpty()
             "${attr("class").substringAfterLast('.')}|${attr("text")}|${attr("bounds")}|c=${attr("clickable")} e=${attr("enabled")}"
         }.joinToString(" ;; ")
-        throw AssertionError("button '$text' not found on the onboarding screen; nodes=$nodes")
+        Qa.screenshot("O1Buttons-fail.png")
+        throw AssertionError("button '$text' not found on the onboarding screen; steps=$steps stalled=$stalled nodes=$nodes")
     }
 
     /** A control outside the scrolling list (the bottom bar). */
