@@ -8,8 +8,8 @@ PKG=com.gimso2x.herdr
 FROM_APK=$1
 TO_APK=$2
 
-field() { # <dumpsys field name>
-  adb shell dumpsys package "$PKG" | tr -d '\r' | grep -m1 -o -E "$1=[^ ]+( [0-9:]+)?" | cut -d= -f2-
+field() { # <dumpsys field name>; sed (not grep -m1/head) reads all input so pipefail never sees SIGPIPE
+  adb shell dumpsys package "$PKG" | tr -d '\r' | grep -o -E "$1=[^ ]+( [0-9:]+)?" | cut -d= -f2- | sed -n 1p
 }
 
 adb install "$FROM_APK"
