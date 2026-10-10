@@ -150,6 +150,21 @@ run_phase() {
     echo "=== phase $cls: OK"
   else
     fail "phase $cls did not report OK"
+    case "$cls" in
+      L*) ;;
+      *)
+        # Not a live phase: window focus, display and rotation settings and a screenshot are safe to keep.
+        echo "--- device state after $cls"
+        timeout 30 adb shell dumpsys window 2>/dev/null | tr -d '\r' | grep -E "mCurrentFocus|mFocusedApp|mInputMethodWindow|isKeyguardShowing|mShowingDream" | cut -c1-200 | head -n 6
+        timeout 20 adb shell wm size 2>/dev/null | tr -d '\r'
+        timeout 20 adb shell wm density 2>/dev/null | tr -d '\r'
+        echo "rotation: user=$(timeout 20 adb shell settings get system user_rotation 2>/dev/null | tr -d '\r') auto=$(timeout 20 adb shell settings get system accelerometer_rotation 2>/dev/null | tr -d '\r') font=$(timeout 20 adb shell settings get system font_scale 2>/dev/null | tr -d '\r')"
+        timeout 20 adb shell mkdir -p /sdcard/Download/qa >/dev/null 2>&1 || true
+        timeout 30 adb shell dumpsys activity activities 2>/dev/null | tr -d '\r' | grep -E "topResumedActivity|mResumedActivity" | cut -c1-200 | head -n 3
+        timeout 30 adb shell screencap -p "/sdcard/Download/qa/$cls-device.png" >/dev/null 2>&1 || true
+        echo "--- end device state"
+        ;;
+    esac
     # Crash/diagnostic lines of the failed phase only: app tags, crashes, test failure facts.
     timeout 60 adb logcat -d -s QaFail HerdrWatch HerdrBoot HerdrDownload AndroidRuntime:E >"$OUT/$cls-log.txt" 2>&1 || true
     timeout 60 adb logcat -d -b all -t 600 '*:W' >"$OUT/$cls-log-all.txt" 2>&1 || true
