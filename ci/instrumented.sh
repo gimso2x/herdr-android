@@ -46,14 +46,14 @@ fail() {
 declare -A CLASSES=(
   [L1]="L1LiveLoadTest" [L2]="L2BadTokenTest" [L3]="L3ExpiryRecoveryTest" [L4]="L4LiveDownloadTest"
   [G1]="G1GuardFixtureTest" [A1]="A1RenewalTest" [A2]="A2RenewalRejectedTest"
-  [F1]="F1ExternalPopupTest" [F2]="F2RotationTest" [F3]="F3RecreateTest" [F4]="F4BackOrderTest" [F5]="F5ImeResizeTest"
+  [F1]="F1ExternalPopupTest" [F2]="F2RotationTest" [F3]="F3RecreateTest" [F4]="F4BackOrderTest" [F5]="F5ImeResizeTest" [F6]="F6ViewportUnitsTest"
   [C1]="C1FileChooserTest" [C2]="C2MicGrantTest" [C3]="C3MicDenyTest" [C4]="C4ClipboardTest" [C5]="C5FixtureDownloadTest"
   [R1]="R1ServedRevisionTest"
   [W1]="W1NotifyTest" [W2]="W2TapNotificationTest" [W3]="W3SeedOnTest W3SeedOffTest W3ToggleTest" [W4]="W4PermissionOffTest"
   [Sstore]="SStoreWriteTest SStoreReadTest" [Scookie]="SCookieWipeTest"
 )
-FULL_ORDER="L1 L2 L3 L4 G1 A1 A2 F1 F2 F3 F4 F5 C1 C2 C3 C4 C5 R1 W1 W2 W3 W4 Sstore Scookie"
-SUBSET_ORDER="F5 W1 W2 W3 W4"
+FULL_ORDER="L1 L2 L3 L4 G1 A1 A2 F1 F2 F3 F4 F5 F6 C1 C2 C3 C4 C5 R1 W1 W2 W3 W4 Sstore Scookie"
+SUBSET_ORDER="F5 F6 W1 W2 W3 W4"
 if [ "$API" = "34" ]; then ALLOWED="$FULL_ORDER"; else ALLOWED="$SUBSET_ORDER"; fi
 
 selected() {

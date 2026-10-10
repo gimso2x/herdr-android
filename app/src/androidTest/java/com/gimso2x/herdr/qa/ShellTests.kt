@@ -239,6 +239,53 @@ class F5ImeResizeTest {
     }
 }
 
+/**
+ * F6: viewport-height units resolve against the real viewport. A WebView whose layout params are
+ * wrap_content (the default Compose's AndroidView gives a view without params) makes Chromium force a
+ * zero layout height: 100vh/100dvh/100svh/100lvh all compute to 0 while innerHeight is right, and
+ * herdr-web-ui's `.app { height: var(--app-height, 100dvh) }` collapses every pane to 0px (blank terminal).
+ */
+@RunWith(AndroidJUnit4::class)
+class F6ViewportUnitsTest {
+    @After fun tearDown() = Qa.hooksReset()
+
+    @Test
+    fun viewportUnitsAreNotZero() {
+        Qa.resetState(alerts = false, token = Qa.syntheticToken())
+        val fx = Fixture()
+        // The same shape as herdr-web-ui's shell: a column as tall as the viewport unit, a flexible body.
+        fx.routes["/"] = {
+            fx.html(
+                "f6",
+                "<style>html,body{margin:0}#app{display:flex;flex-direction:column;height:100%;height:var(--app-height,100dvh)}" +
+                    "#body{flex:1 1 auto;min-height:0}</style>" +
+                    "<div id=app><div style=\"height:40px\">header</div><div id=body>body</div></div>",
+            )
+        }
+        fx.start()
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                Qa.awaitJs("fixture page", 30_000, "document.getElementById('body') !== null && document.readyState === 'complete'")
+                val inner = (Qa.js("window.innerHeight") as Number).toDouble()
+                assertTrue("innerHeight is $inner", inner > 100)
+                for (unit in listOf("vh", "dvh", "svh", "lvh")) {
+                    val height = (Qa.js(
+                        "(function(){var d=document.createElement('div');d.style.cssText='position:fixed;top:0;width:1px;height:100$unit';" +
+                            "document.body.appendChild(d);var h=d.getBoundingClientRect().height;d.remove();return h})()",
+                    ) as Number).toDouble()
+                    assertEquals("100$unit", inner, height, 1.0)
+                }
+                val app = (Qa.js("document.getElementById('app').getBoundingClientRect().height") as Number).toDouble()
+                val body = (Qa.js("document.getElementById('body').getBoundingClientRect().height") as Number).toDouble()
+                assertEquals("app column height", inner, app, 1.0)
+                assertTrue("body height $body", body > 100)
+            }
+        } finally {
+            fx.stop()
+        }
+    }
+}
+
 /** R1: UI served by the server changes without touching the installed APK. */
 @RunWith(AndroidJUnit4::class)
 class R1ServedRevisionTest {
