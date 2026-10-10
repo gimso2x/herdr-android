@@ -82,20 +82,29 @@ private object Ob {
         val device = Qa.device
         assertNotNull("onboarding screen did not show", device.wait(Until.hasObject(By.text("처음 설정 안내")), 30_000))
 
-        fun shown(): UiObject2? {
-            val node = device.findObject(By.text(text)) ?: return null
-            val area = device.findObject(By.scrollable(true))?.visibleBounds ?: return null
-            val barTop = device.findObject(By.text("시작하기"))?.visibleBounds?.top?.takeIf { it > area.top } ?: area.bottom
-            val b = node.visibleBounds
-            return node.takeIf { b.height() >= 14 && b.top >= area.top && b.bottom <= minOf(area.bottom, barTop) }
+        fun shown(): UiObject2? = try {
+            val node = device.findObject(By.text(text))
+            val area = device.findObject(By.scrollable(true))?.visibleBounds
+            if (node == null || area == null) {
+                null
+            } else {
+                val barTop = device.findObject(By.text("시작하기"))?.visibleBounds?.top?.takeIf { it > area.top } ?: area.bottom
+                val b = node.visibleBounds
+                node.takeIf { b.height() >= 14 && b.top >= area.top && b.bottom <= minOf(area.bottom, barTop) }
+            }
+        } catch (_: androidx.test.uiautomator.StaleObjectException) {
+            null
         }
 
         shown()?.let { return it }
         toTop()
         // The list moved if any text changed its position. UiObject2.scroll()'s return value is not
         // trusted (it reported "cannot scroll" for a Compose list that could): progress is measured.
-        fun layout(): String = device.findObjects(By.clazz("android.widget.TextView"))
-            .joinToString("|") { "${it.text}@${it.visibleBounds.top}" }
+        // A node going stale means the screen was still changing: that counts as movement.
+        fun layout(): String = runCatching {
+            device.findObjects(By.clazz("android.widget.TextView"))
+                .joinToString("|") { "${it.text}@${it.visibleBounds.top}" }
+        }.getOrElse { "stale-${System.nanoTime()}" }
         var stalled = 0
         var steps = 0
         while (steps++ < 40 && stalled < 3) {

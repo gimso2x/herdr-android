@@ -70,7 +70,15 @@ class U1UpgradePathTest {
                 assertEquals(0, fx.log.size)
 
                 // The fixture address (debug builds accept loopback) completes it with the stored token.
-                fields[0].text = fx.base
+                val field = Qa.device.wait(Until.findObject(By.clazz("android.widget.EditText")), 30_000)
+                assertNotNull(field)
+                field.text = fx.base
+                // The button enables with the next recomposition: wait for the error text to go first.
+                assertTrue(
+                    "invalid-address message did not go away",
+                    Qa.device.wait(Until.gone(By.textContains("https://로 시작하는")), 15_000) == true,
+                )
+                Qa.device.waitForIdle(5_000)
                 val connect = Qa.device.wait(Until.findObject(By.text("연결").enabled(true)), 30_000)
                 assertNotNull("connect button never enabled", connect)
                 connect.click()
