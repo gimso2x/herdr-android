@@ -144,12 +144,14 @@ object Qa {
 
     fun screenBitmap(): android.graphics.Bitmap = decodePng(screenPng())
 
-    /** Stores exactly [bytes] as /sdcard/Download/qa/[name] (the file the harness pulls). */
-    fun savePng(name: String, bytes: ByteArray) {
-        shell("mkdir -p /sdcard/Download/qa")
-        val fds = instr.uiAutomation.executeShellCommandRw("sh -c 'cat > /sdcard/Download/qa/$name'")
-        ParcelFileDescriptor.AutoCloseOutputStream(fds[1]).use { it.write(bytes) }
-        ParcelFileDescriptor.AutoCloseInputStream(fds[0]).use { it.readBytes() }
+    /**
+     * Captures the display into /sdcard/Download/qa/[name] (the file the harness pulls) and returns
+     * the bytes of that very file, so a caller can verify the stored frame itself.
+     */
+    fun screenshotBytes(name: String): ByteArray {
+        screenshot(name)
+        val pfd = instr.uiAutomation.executeShellCommand("cat /sdcard/Download/qa/$name")
+        return ParcelFileDescriptor.AutoCloseInputStream(pfd).use { it.readBytes() }
     }
 
     /** Fraction of pixels (0..1) whose colour differs between two equally sized screenshots. */

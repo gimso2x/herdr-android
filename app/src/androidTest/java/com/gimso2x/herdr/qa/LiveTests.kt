@@ -120,18 +120,14 @@ class L1LiveLoadTest {
                 ),
             )
             assertEquals(0L, (Qa.js("window.__qaBlocked") as Number).toLong())
-            // The DOM can be a frame or more ahead of what the display shows: keep only a frame
-            // whose pixels differ substantially from the closed-drawer baseline, and store exactly
-            // that frame (not a second capture).
+            // The DOM can be a frame or more ahead of what the display shows: capture into l1.png
+            // until the stored file itself differs substantially from the closed-drawer baseline.
             var changed = 0.0
-            var frame = ByteArray(0)
-            Qa.until(20_000, "screen shows the open drawer", { "changedFraction=$changed" }) {
-                frame = Qa.screenPng()
-                changed = Qa.changedFraction(before, Qa.decodePng(frame))
+            Qa.until(20_000, "l1.png shows the open drawer", { "changedFraction=$changed" }) {
+                changed = Qa.changedFraction(before, Qa.decodePng(Qa.screenshotBytes("l1.png")))
                 changed >= 0.15
             }
             Qa.logFact("l1 screen changed fraction=$changed drawerStillOpen=${Qa.js("document.querySelector('button.drawer-toggle').getAttribute('aria-expanded')")}")
-            Qa.savePng("l1.png", frame)
         }
     }
 }
