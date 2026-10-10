@@ -144,7 +144,8 @@ jobs:
           QA_PHASES: ${{ inputs.phases }}
         with:
           api-level: ${{ matrix.api-level }}
-          target: google_apis
+          # AOSP image: no Play services, whose process death on the 2-core runner killed the app.
+          target: default
           arch: x86_64
           # No -noaudio: the microphone scenarios need the emulator's audio.
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -no-metrics

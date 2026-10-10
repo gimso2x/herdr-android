@@ -42,6 +42,13 @@ private fun awaitLivePage(timeoutMs: Long, extra: String = "true", detail: () ->
     }
 }
 
+/** True once an element of the workspace drawer holding [quotedLabel] (lower-case JSON string) is fully inside the viewport. */
+private fun labelInViewport(quotedLabel: String): String =
+    "(function(){var d=document.getElementById('workspace-drawer');if(!d||getComputedStyle(d).visibility!=='visible')return false;" +
+        "var els=d.querySelectorAll('*');for(var i=0;i<els.length;i++){var e=els[i];" +
+        "if(e.children.length===0&&e.textContent.toLowerCase().indexOf($quotedLabel)>=0){var b=e.getBoundingClientRect();" +
+        "return b.width>0&&b.height>0&&b.left>=0&&b.top>=0&&b.right<=window.innerWidth&&b.bottom<=window.innerHeight}}return false})()"
+
 @RunWith(AndroidJUnit4::class)
 class L1LiveLoadTest {
     @After fun tearDown() = Qa.hooksReset()
@@ -67,10 +74,21 @@ class L1LiveLoadTest {
             val rewritten = (Qa.js("window.__qaRoleRewritten") as Number).toLong()
             assertTrue("guard saw no role frame rewritten to observe", rewritten >= 1)
 
-            // Open the workspace list drawer (a client-side toggle, nothing is sent) so the
-            // screenshot shows the list itself.
-            Qa.tap("button.drawer-toggle")
-            Qa.awaitJs("workspace drawer open", 20_000, "document.getElementById('workspace-drawer').getBoundingClientRect().left >= 0")
+            // Open the workspace list drawer with a real tap (a client-side toggle, nothing is
+            // sent), unless the page already shows it open (a tap would close it), then wait for
+            // the first workspace label element to be laid out inside the viewport.
+            if (Qa.js("document.querySelector('button.drawer-toggle').getAttribute('aria-expanded') === 'true'") != true) {
+                Qa.tap("button.drawer-toggle")
+            }
+            Qa.until(
+                20_000,
+                "workspace label visible in the open drawer",
+                {
+                    "drawer=${Qa.js("(function(){var d=document.getElementById('workspace-drawer');var b=d.getBoundingClientRect();" +
+                        "return d.className+' vis='+getComputedStyle(d).visibility+' left='+b.left+' right='+b.right+' vw='+window.innerWidth+" +
+                        "' expanded='+document.querySelector('button.drawer-toggle').getAttribute('aria-expanded')})()")}"
+                },
+            ) { Qa.js(labelInViewport(quoted)) == true }
             Qa.awaitFrame()
             assertEquals(0L, (Qa.js("window.__qaBlocked") as Number).toLong())
             Qa.screenshot("l1.png")
