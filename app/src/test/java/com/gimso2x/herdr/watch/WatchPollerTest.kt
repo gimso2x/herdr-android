@@ -183,7 +183,7 @@ class WatchPollerTest {
         OkHttpClient.Builder()
             .addInterceptor { chain ->
                 val request = chain.request()
-                requests += "${request.method} ${request.url.encodedPath}${request.url.query?.let { "?$it" }.orEmpty()}"
+                requests += "${request.method} ${request.url.encodedPath}${request.url.encodedQuery?.let { "?$it" }.orEmpty()}"
                 val json = when (request.url.encodedPath) {
                     "/api/pane/prompt" -> """{"prompt":{"question":"Apply the fixture migration?\nsecond line","title":"t"},"suggestion":null}"""
                     "/api/pane/conversation" -> "{}"
