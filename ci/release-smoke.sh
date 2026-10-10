@@ -41,7 +41,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-die() { note "FAIL: $*"; exit 1; }
+# Printed to the job log only (never the uploaded summary) when a step fails: counts and names, no URLs or text.
+failure_facts() {
+  local acts log
+  acts=$(adb shell dumpsys activity activities 2>/dev/null | tr -d '\r') || true
+  log=$(adb logcat -d 2>/dev/null) || true
+  echo "--- failure facts"
+  grep -o -E 'ResumedActivity: ActivityRecord\{[^ ]+ u0 [^ ]+' <<<"$acts" | sed -E 's/.* u0 //' | sed -n 1p
+  grep -o -E 'net::ERR_[A-Z_]+|FATAL EXCEPTION|ANR in [A-Za-z.]+|Choreographer: Skipped [0-9]+ frames' <<<"$log" | sort | uniq -c
+  echo "---"
+}
+
+die() { note "FAIL: $*"; failure_facts; exit 1; }
 
 # --- uiautomator dump queries (python only parses the XML; values are never printed) ----------
 dumpui() {
