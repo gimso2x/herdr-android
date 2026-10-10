@@ -15,9 +15,8 @@ Cloudflare Access 서비스 토큰으로 한 번 로그인하면 쿠키를 앱�
 
 ## 설치와 자동 업데이트 (Obtainium)
 
-1. GitHub에서 fine-grained personal access token을 만듭니다. 대상 저장소는 `gimso2x/herdr-android` 하나만, 권한은 **Contents: Read-only**만 줍니다(private 저장소라 필요).
-2. 폰에 [Obtainium](https://github.com/ImranR98/Obtainium)을 설치하고 앱 추가에서 `https://github.com/gimso2x/herdr-android`를 입력합니다. 소스는 GitHub, 위 토큰은 추가 옵션의 GitHub 토큰 칸에 넣습니다.
-3. 릴리스의 `app-release.apk`를 설치합니다. 이후 새 릴리스가 나오면 Obtainium이 같은 서명으로 제자리 업데이트하므로 앱 데이터(토큰)는 유지됩니다. 프리릴리스(`-rc`)는 무시하세요.
+1. 폰에 [Obtainium](https://github.com/ImranR98/Obtainium)을 설치하고 앱 추가에서 `https://github.com/gimso2x/herdr-android`를 입력합니다. 저장소가 공개라서 토큰은 필요 없습니다.
+2. 릴리스의 `app-release.apk`를 설치합니다. 이후 새 릴리스가 나오면 Obtainium이 같은 서명으로 제자리 업데이트하므로 앱 데이터(토큰)는 유지됩니다. 프리릴리스(`-rc`)는 무시하세요.
 
 ## 폰 토큰 입력
 
