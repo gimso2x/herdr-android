@@ -28,6 +28,27 @@
     <string name="settings_notifications_off">알림 권한이 꺼져 있습니다</string>
     <string name="settings_open_notification_settings">설정 열기</string>
     <string name="shortcut_settings">설정</string>
+    <string name="settings_battery">배터리 제한 해제</string>
+    <string name="settings_auto_revoke">사용하지 않는 앱 일시중지 끄기</string>
+    <string name="settings_show_onboarding">처음 설정 안내 다시 보기</string>
+
+    <string name="onboarding_title">처음 설정 안내</string>
+    <string name="onboarding_intro">알림이 제때 오려면 아래 설정을 확인하세요.</string>
+    <string name="onboarding_status_done">완료</string>
+    <string name="onboarding_status_todo">필요</string>
+    <string name="onboarding_notifications">알림 허용</string>
+    <string name="onboarding_notifications_button">허용하기</string>
+    <string name="onboarding_battery">배터리 제한 해제 (알림이 제때 오려면 필수)</string>
+    <string name="onboarding_battery_button">제한 해제하기</string>
+    <string name="onboarding_auto_revoke">사용하지 않는 앱 일시중지 끄기</string>
+    <string name="onboarding_auto_revoke_button">일시중지 끄기</string>
+    <string name="onboarding_samsung">삼성: 설정 &gt; 배터리 &gt; 백그라운드 사용 제한 &gt; 절전 예외 앱에 herdr 추가</string>
+    <string name="onboarding_samsung_button">앱 설정 열기</string>
+    <string name="onboarding_info_settings">설정은 홈 화면에서 herdr 아이콘을 길게 눌러 “설정” 또는 상단 “에이전트 알림 대기 중” 알림을 눌러 열 수 있어요</string>
+    <string name="onboarding_info_silent">상단 “에이전트 알림 대기 중” 알림은 무음으로 바꿔도 되지만 끄지는 마세요</string>
+    <string name="onboarding_info_limits">알림 한계: 15초마다 확인, 앱을 열어 둔 동안은 알림 없음, 완료 알림은 1분 이상 걸린 작업만</string>
+    <string name="onboarding_warning">알림 허용과 배터리 제한 해제가 안 되어 있으면 알림이 늦거나 오지 않을 수 있어요.</string>
+    <string name="onboarding_start">시작하기</string>
 
     <string name="shell_network_error">서버에 연결할 수 없습니다</string>
     <string name="shell_retry">다시 시도</string>

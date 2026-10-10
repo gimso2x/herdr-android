@@ -191,6 +191,19 @@ object Qa {
             prefs.edit()
                 .putBoolean("alerts_enabled", enabled)
                 .putBoolean("notification_permission_asked", true)
+                // The baseline is a finished onboarding; the onboarding tests turn it off themselves.
+                .putBoolean("onboarding_done", true)
+                .commit(),
+        ) { "preferences not written" }
+    }
+
+    /** Persisted onboarding/notification-asked flags for the onboarding scenarios (after [resetState]). */
+    fun setOnboarding(done: Boolean, asked: Boolean) {
+        val prefs = targetContext.getSharedPreferences("herdr_prefs", Context.MODE_PRIVATE)
+        check(
+            prefs.edit()
+                .putBoolean("onboarding_done", done)
+                .putBoolean("notification_permission_asked", asked)
                 .commit(),
         ) { "preferences not written" }
     }

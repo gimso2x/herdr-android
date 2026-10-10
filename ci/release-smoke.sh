@@ -245,6 +245,20 @@ if [ "$BAD" = "1" ]; then
   exit 0
 fi
 
+# --- happy path: the first successful setup continues into the onboarding checklist --------------------
+# The checklist is plain Compose (no live page), so uiautomator dumps it fine. "시작하기" is allowed with
+# unfinished items; notifications were granted up front, battery/sleeping-app rows stay undone.
+onboarding_up() { resumed OnboardingActivity && dumpui && ui node '시작하기' >/dev/null; }
+wait_for 60 'onboarding checklist with "시작하기"' onboarding_up || die "onboarding checklist did not appear after setup"
+if resumed MainActivity; then die "MainActivity resumed before the onboarding checklist was finished"; fi
+ui has '알림 허용' || die "onboarding row '알림 허용' is missing"
+ui has '배터리 제한 해제' || die "onboarding row '배터리 제한 해제' is missing"
+ui has '사용하지 않는 앱 일시중지 끄기' || die "onboarding row '사용하지 않는 앱 일시중지 끄기' is missing"
+note "ONBOARDING SEEN: OnboardingActivity resumed after setup with the checklist rows"
+read -r ox oy _ <<<"$(ui node '시작하기')"
+adb shell input tap "$ox" "$oy"
+note "tapped 시작하기"
+
 # --- happy path: MainActivity resumed with a WebView, then the pane area ------------------------------
 # uiautomator cannot dump the live page once its terminal renders: the blinking cursor keeps the UI from
 # ever idling ("could not get idle state"), so the WebView is looked up in the view hierarchy and the page
@@ -283,13 +297,13 @@ for _ in 1 2 3 4 5 6; do
   if dumpui; then text_checked=1; break; fi
   sleep 2
 done
-if [ "$text_checked" -eq 1 ]; then
+if [ "$text_checked" -eq 1 ] && [ "$(ui webview)" -gt 0 ]; then
   ui has 'herdr 연결' && die "setup screen is still visible"
   ui has 'Cloudflare' && die "a Cloudflare page is showing instead of herdr"
   ui has 'Sign in' && die "a login page is showing instead of herdr"
   note "ui text checks done: no setup, Cloudflare or login text; web content nodes under WebView: $(ui webview)"
 else
-  note "ui text checks skipped: uiautomator never got an idle UI (the live terminal blinks)"
+  note "ui text checks skipped: uiautomator got no idle UI or an empty web accessibility tree (the live terminal blinks)"
 fi
 
 adb exec-out screencap -p >"$TMP/release-smoke.png" || die "screencap failed"

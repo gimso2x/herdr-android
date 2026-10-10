@@ -3,7 +3,7 @@
 #
 #   ci/instrumented.sh <api-level>
 #
-# API 34 runs every phase, any other API only the lifecycle/inset subset (F5, W1-W4).
+# API 34 runs every phase, any other API only the lifecycle/inset subset (F5, F6, W1-W4) plus the onboarding phase O1.
 # QA_PHASES (space separated group ids, e.g. "L1 W3") restricts a run for debugging; a full run
 # leaves it empty. Credentials: the workflow writes $RUNNER_TEMP/qa-token.json, this script pushes
 # it to /data/local/tmp and the trap removes both. No `set -x`, nothing secret is echoed.
@@ -50,10 +50,12 @@ declare -A CLASSES=(
   [C1]="C1FileChooserTest" [C2]="C2MicGrantTest" [C3]="C3MicDenyTest" [C4]="C4ClipboardTest" [C5]="C5FixtureDownloadTest"
   [R1]="R1ServedRevisionTest"
   [W1]="W1NotifyTest" [W2]="W2TapNotificationTest" [W3]="W3SeedOnTest W3SeedOffTest W3ToggleTest" [W4]="W4PermissionOffTest"
+  [O1]="O1SetupToOnboardingTest O1MainStartShowsOnboardingTest O1ButtonsTest O1StartTest O1WatchNotificationTest"
+  [O2]="O2PermissionRequestTest"
   [Sstore]="SStoreWriteTest SStoreReadTest" [Scookie]="SCookieWipeTest"
 )
-FULL_ORDER="L1 L2 L3 L4 G1 A1 A2 F1 F2 F3 F4 F5 F6 C1 C2 C3 C4 C5 R1 W1 W2 W3 W4 Sstore Scookie"
-SUBSET_ORDER="F5 F6 W1 W2 W3 W4"
+FULL_ORDER="L1 L2 L3 L4 G1 A1 A2 F1 F2 F3 F4 F5 F6 C1 C2 C3 C4 C5 R1 W1 W2 W3 W4 O1 O2 Sstore Scookie"
+SUBSET_ORDER="F5 F6 W1 W2 W3 W4 O1"
 if [ "$API" = "34" ]; then ALLOWED="$FULL_ORDER"; else ALLOWED="$SUBSET_ORDER"; fi
 
 selected() {
@@ -210,6 +212,11 @@ group() {
     W4)
       adb shell pm revoke "$PKG" android.permission.POST_NOTIFICATIONS
       run_phase W4PermissionOffTest
+      adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS
+      ;;
+    O2)
+      adb shell pm revoke "$PKG" android.permission.POST_NOTIFICATIONS
+      run_phase O2PermissionRequestTest
       adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS
       ;;
     Sstore)

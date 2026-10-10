@@ -237,6 +237,14 @@ class MainActivity : ComponentActivity() {
             }
         }
         startFlow()
+        if (savedInstanceState == null) lifecycleScope.launch { openOnboardingIfPending() }
+    }
+
+    /** A stored token with the checklist not done yet (first run after an update): show it once. */
+    private suspend fun openOnboardingIfPending() {
+        if (AppPreferences(this).onboardingDone) return
+        val hasToken = withContext(Dispatchers.IO) { app.tokenStore.get() != null }
+        if (hasToken && !AppPreferences(this).onboardingDone) startActivity(OnboardingActivity.intent(this))
     }
 
     override fun onStart() {
@@ -245,7 +253,9 @@ class MainActivity : ComponentActivity() {
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
         val prefs = AppPreferences(this)
-        when (NotificationGate.decide(Build.VERSION.SDK_INT, granted, prefs.notificationPermissionAsked)) {
+        // While onboarding is pending it owns the permission request ("알림 허용" row).
+        val asked = prefs.notificationPermissionAsked || !prefs.onboardingDone
+        when (NotificationGate.decide(Build.VERSION.SDK_INT, granted, asked)) {
             NotificationAction.START_WATCHER -> WatcherController.start(this)
             NotificationAction.REQUEST_THEN_START -> {
                 prefs.notificationPermissionAsked = true

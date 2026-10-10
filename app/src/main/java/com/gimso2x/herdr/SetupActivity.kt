@@ -62,7 +62,13 @@ class SetupActivity : ComponentActivity() {
                 }
                 LaunchedEffect(model.done) {
                     if (model.done) {
-                        startActivity(Intent(this@SetupActivity, MainActivity::class.java))
+                        // The very first successful setup continues into the onboarding checklist.
+                        val next = if (AppPreferences(this@SetupActivity).onboardingDone) {
+                            MainActivity::class.java
+                        } else {
+                            OnboardingActivity::class.java
+                        }
+                        startActivity(Intent(this@SetupActivity, next))
                         finish()
                     }
                 }

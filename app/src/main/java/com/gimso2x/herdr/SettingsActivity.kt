@@ -71,6 +71,9 @@ class SettingsActivity : ComponentActivity() {
                                 .putExtra(Settings.EXTRA_APP_PACKAGE, packageName),
                         )
                     },
+                    onOpenBattery = { SystemSettings.requestIgnoreBatteryOptimizations(this) },
+                    onOpenAutoRevoke = { SystemSettings.openAutoRevokeSettings(this) },
+                    onShowOnboarding = { startActivity(OnboardingActivity.intent(this)) },
                 )
             }
         }
@@ -89,9 +92,16 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     var notificationsEnabled by mutableStateOf(true)
         private set
 
+    var ignoringBattery by mutableStateOf(false)
+        private set
+    var autoRevokeExempt by mutableStateOf(false)
+        private set
+
     fun refresh() {
         alertsEnabled = prefs.alertsEnabled
         notificationsEnabled = NotificationManagerCompat.from(app).areNotificationsEnabled()
+        ignoringBattery = SystemSettings.ignoringBatteryOptimizations(app)
+        autoRevokeExempt = SystemSettings.autoRevokeExempt(app)
         viewModelScope.launch {
             val token = withContext(Dispatchers.IO) { app.tokenStore.get() }
             maskedClientId = token?.let { SetupLogic.maskClientId(it.clientId) }
@@ -121,6 +131,9 @@ private fun SettingsScreen(
     onBack: () -> Unit,
     onReplaceToken: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
+    onOpenBattery: () -> Unit,
+    onOpenAutoRevoke: () -> Unit,
+    onShowOnboarding: () -> Unit,
 ) {
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -171,6 +184,33 @@ private fun SettingsScreen(
                     Text(stringResource(R.string.settings_open_notification_settings))
                 }
             }
+
+            HorizontalDivider()
+
+            SettingStatusRow(stringResource(R.string.settings_battery), model.ignoringBattery)
+            OutlinedButton(onClick = onOpenBattery) { Text(stringResource(R.string.onboarding_battery_button)) }
+            SettingStatusRow(stringResource(R.string.settings_auto_revoke), model.autoRevokeExempt)
+            OutlinedButton(onClick = onOpenAutoRevoke) { Text(stringResource(R.string.onboarding_auto_revoke_button)) }
+
+            HorizontalDivider()
+
+            OutlinedButton(onClick = onShowOnboarding) { Text(stringResource(R.string.settings_show_onboarding)) }
         }
+    }
+}
+
+@Composable
+private fun SettingStatusRow(title: String, done: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        Text(
+            stringResource(if (done) R.string.onboarding_status_done else R.string.onboarding_status_todo),
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (done) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+        )
     }
 }

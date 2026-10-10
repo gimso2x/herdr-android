@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.core.app.NotificationCompat
 import com.gimso2x.herdr.MainActivity
+import com.gimso2x.herdr.SettingsActivity
 import com.gimso2x.herdr.R
 
 object WatchNotifications {
@@ -51,7 +52,7 @@ object WatchNotifications {
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentTitle(context.getString(R.string.app_name))
             .setContentText(text)
-            .setContentIntent(openApp(context, paneId = null))
+            .setContentIntent(openSettings(context))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -90,6 +91,17 @@ object WatchNotifications {
 
     fun hasPostPermission(context: Context): Boolean =
         context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    /** The ongoing "waiting" notification opens Settings; alert notifications open the pane instead. */
+    private fun openSettings(context: Context): PendingIntent {
+        val intent = Intent(context, SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return PendingIntent.getActivity(
+            context,
+            NOTIFY_WATCH,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+    }
 
     private fun openApp(context: Context, paneId: String?): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
