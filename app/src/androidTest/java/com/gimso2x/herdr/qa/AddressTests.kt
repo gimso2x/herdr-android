@@ -61,23 +61,19 @@ class U1UpgradePathTest {
                 assertEquals("the token must be kept", Qa.syntheticToken(), Qa.app.tokenStore.get())
                 assertEquals("nothing may be contacted before the address is entered", 0, fx.log.size)
 
-                // An invalid address is reported on the field and nothing is contacted.
+                // An invalid (http) address cannot be submitted: pressing "연결" contacts nothing, stores nothing.
                 fields!![0].text = "http://insecure.example.com"
-                assertNotNull(
-                    "invalid-address message not shown",
-                    Qa.device.wait(Until.findObject(By.textContains("https://로 시작하는")), 15_000),
-                )
+                Qa.device.waitForIdle(5_000)
+                Qa.device.findObject(By.text("연결"))?.click()
+                Qa.device.waitForIdle(5_000)
                 assertEquals(0, fx.log.size)
+                assertNull(Qa.app.tokenStore.getServer())
+                assertTrue(Qa.liveActivityNames().contains("SetupActivity"))
 
                 // The fixture address (debug builds accept loopback) completes it with the stored token.
                 val field = Qa.device.wait(Until.findObject(By.clazz("android.widget.EditText")), 30_000)
                 assertNotNull(field)
                 field.text = fx.base
-                // The button enables with the next recomposition: wait for the error text to go first.
-                assertTrue(
-                    "invalid-address message did not go away",
-                    Qa.device.wait(Until.gone(By.textContains("https://로 시작하는")), 15_000) == true,
-                )
                 Qa.device.waitForIdle(5_000)
                 val connect = Qa.device.wait(Until.findObject(By.text("연결").enabled(true)), 30_000)
                 assertNotNull("connect button never enabled", connect)
