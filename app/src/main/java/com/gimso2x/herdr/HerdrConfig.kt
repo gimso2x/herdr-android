@@ -16,9 +16,11 @@ object HerdrConfig {
     internal fun applyOverride(url: String?, debugBuild: Boolean) {
         if (!debugBuild) return
         val cleaned = url?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
-        require(cleaned == null || cleaned.startsWith("http://") || cleaned.startsWith("https://")) {
-            "base url override must be http(s)"
+        require(cleaned == null || LOOPBACK_ORIGIN.matches(cleaned)) {
+            "base url override must be http(s)://127.0.0.1 or localhost, optionally with a port"
         }
         debugOverride = cleaned
     }
+
+    private val LOOPBACK_ORIGIN = Regex("""https?://(127\.0\.0\.1|localhost)(:\d{1,5})?""")
 }

@@ -51,7 +51,7 @@ class StatusWatcherService : Service() {
             baseUrl = baseUrl,
             cookie = { CookieManager.getInstance().getCookie(baseUrl) },
             tracker = StatusTracker { WatchTestHooks.clock.nowMillis() },
-            onAlerts = { WatchNotifications.show(context, it) },
+            onAlerts = { if (scope.isActive) WatchNotifications.show(context, it) },
         )
     }
 

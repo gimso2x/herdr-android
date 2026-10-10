@@ -4,10 +4,18 @@ import com.gimso2x.herdr.access.AccessSession
 import com.gimso2x.herdr.access.BootstrapResult
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -45,19 +53,39 @@ class WatchPoller(
             .header("Cookie", cookieHeader)
             .build()
         return try {
-            client.newCall(request).execute().use { response -> handle(seq, response.code, response) }
+            // The call is cancelled with the coroutine; a response that still arrives is dropped.
+            client.newCall(request).await().use { response ->
+                val context = currentCoroutineContext()
+                context.ensureActive()
+                handle(seq, response.code, response, context)
+            }
         } catch (_: IOException) {
             PollResult(seq, PollOutcome.NETWORK)
         }
     }
 
-    private fun handle(seq: Long, code: Int, response: Response): PollResult = when (code) {
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private suspend fun Call.await(): Response = suspendCancellableCoroutine { continuation ->
+        continuation.invokeOnCancellation { cancel() }
+        enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                continuation.resumeWithException(e)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                continuation.resume(response) { _, _, _ -> response.close() }
+            }
+        })
+    }
+
+    private fun handle(seq: Long, code: Int, response: Response, context: CoroutineContext): PollResult = when (code) {
         200 -> {
             val samples = SnapshotParser.parse(response.body?.string().orEmpty())
             if (samples == null) {
                 PollResult(seq, PollOutcome.PARSE_ERROR)
             } else {
                 val alerts = tracker.update(samples)
+                context.ensureActive() // never alert once the poll's owner has been stopped
                 if (alerts.isNotEmpty()) onAlerts(alerts)
                 PollResult(seq, PollOutcome.OK, samples.size, alerts.size)
             }

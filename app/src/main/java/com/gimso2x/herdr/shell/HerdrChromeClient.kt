@@ -42,7 +42,22 @@ class HerdrChromeClient(
 
     private var pendingFiles: ValueCallback<Array<Uri>>? = null
     private var pendingPermission: PermissionRequest? = null
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private val popups = PopupTracker(
+        object : PopupTracker.Timers {
+            private val handler = Handler(Looper.getMainLooper())
+
+            override fun postDelayed(task: Runnable, delayMillis: Long) {
+                handler.postDelayed(task, delayMillis)
+            }
+
+            override fun post(task: Runnable) {
+                handler.post(task)
+            }
+
+            override fun cancel(task: Runnable) = handler.removeCallbacks(task)
+        },
+        POPUP_TIMEOUT_MILLIS,
+    )
 
     override fun onShowFileChooser(
         webView: WebView?,
@@ -121,16 +136,13 @@ class HerdrChromeClient(
         if (resultMsg == null) return false
         val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
         val throwaway = WebView(host.popupContext())
-        var done = false
-        val finish = Runnable {
-            if (done) return@Runnable
-            done = true
+        val popup = popups.open {
             throwaway.stopLoading()
             throwaway.webViewClient = WebViewClient()
             throwaway.destroy()
         }
         fun route(url: String?) {
-            if (done) return
+            if (popup.resolved) return
             when (val action = PopupPolicy.route(url, urlPolicy)) {
                 PopupAction.Wait -> return
                 is PopupAction.LoadInApp -> host.loadInApp(action.url)
@@ -138,7 +150,7 @@ class HerdrChromeClient(
                 PopupAction.Ignore -> Unit
             }
             // Never destroy from inside the WebView's own callback.
-            mainHandler.post(finish)
+            popup.resolve()
         }
         throwaway.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -151,11 +163,13 @@ class HerdrChromeClient(
                 route(url)
             }
         }
-        mainHandler.postDelayed(finish, POPUP_TIMEOUT_MILLIS)
         transport.webView = throwaway
         resultMsg.sendToTarget()
         return true
     }
+
+    /** Activity is being destroyed: cancel pending popup timeouts and destroy outstanding popup WebViews. */
+    fun dispose() = popups.dispose()
 
     private companion object {
         const val POPUP_TIMEOUT_MILLIS = 10_000L

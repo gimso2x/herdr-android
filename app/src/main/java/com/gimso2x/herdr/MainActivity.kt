@@ -78,7 +78,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Hosts herdr-web-ui in a WebView. Navigation is limited by [UrlPolicy]; the Access cookie is kept
- * fresh by [RefreshScheduler] while resumed. No JavascriptInterface is exposed.
+ * fresh by [RefreshScheduler] while resumed. No native object is exposed to page scripts.
  */
 class MainActivity : ComponentActivity() {
     private val app get() = application as HerdrApplication
@@ -284,6 +284,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        chromeClient.dispose()
         (webView.parent as? android.view.ViewGroup)?.removeView(webView)
         webView.destroy()
         super.onDestroy()
