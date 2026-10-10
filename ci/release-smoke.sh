@@ -253,6 +253,26 @@ note "screenshot release-smoke.png bytes=$png_bytes"
 [ "$png_bytes" -gt 5000 ] || die "screenshot is suspiciously small"
 [ "$(head -c 4 "$TMP/release-smoke.png" | tail -c 3)" = "PNG" ] || die "screenshot is not a PNG"
 
+# --- pane area: tall and not blank -----------------------------------------------------------------
+# The v0.1.0/v0.1.1 bug (every viewport-height unit computed to 0 in the WebView, so the page's
+# `.app` shell and with it the terminal/chat area had no height) left header, banner and tabs drawn
+# over a blank pane area, which the checks above cannot see. The release APK has no devtools, so the
+# DOM is judged from outside: a node under the WebView taller than 100px (not the page container) whose
+# screenshot rectangle is not blank (ci/pane_metrics.py). Booleans and counts only; the screenshots
+# stay on the runner.
+pane_ok() {
+  dumpui && adb exec-out screencap -p >"$TMP/pane.png" \
+    && python3 ci/pane_metrics.py "$TMP/ui.xml" "$TMP/pane.png" >"$TMP/pane.txt"
+}
+pane_seen=0
+wait_for 60 'a visible, non-blank pane area under the WebView' pane_ok && pane_seen=1
+dumpui && adb exec-out screencap -p >"$TMP/pane.png" && python3 ci/pane_metrics.py "$TMP/ui.xml" "$TMP/pane.png" --shape >"$TMP/pane-shape.txt" || true
+# Lengths and bounds only; printed to the job log, not written to the uploaded summary.
+grep '^shape ' "$TMP/pane-shape.txt" || true
+note "$(grep '^pane-metrics:' "$TMP/pane-shape.txt" || echo 'pane-metrics: unavailable')"
+[ "$pane_seen" -eq 1 ] || die "the pane area is missing or blank (no tall, non-blank node under the WebView)"
+note "pane area visible and non-blank"
+
 adb shell pidof "$PKG" >/dev/null || die "app process is not alive"
 fatal=$(adb logcat -d | grep -c -E 'FATAL EXCEPTION|AndroidRuntime: Process: com.gimso2x.herdr' || true)
 note "FATAL count $fatal"
