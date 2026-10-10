@@ -24,3 +24,6 @@
 -dontwarn okio.**
 -keep class okhttp3.** { *; }
 -keep class okio.** { *; }
+
+# security-crypto pulls in Tink, which references compile-time-only errorprone annotations.
+-dontwarn com.google.errorprone.annotations.**
