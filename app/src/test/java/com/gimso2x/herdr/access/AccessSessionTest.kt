@@ -193,4 +193,44 @@ class AccessSessionTest {
         assertEquals(BootstrapResult.InvalidToken, s.ensureFresh())
         assertEquals(0, calls.get())
     }
+
+    @Test
+    fun invalidateDropsCookieSoNextEnsureFreshRefreshes() = runBlocking {
+        val s = session(ttlSeconds = 3600)
+        s.ensureFresh()
+        assertEquals(1, calls.get())
+        s.invalidate()
+        assertEquals("no cookie again: due now", clock.nowMillis, s.nextRefreshAt(clock.nowMillis))
+        s.ensureFresh()
+        assertEquals(2, calls.get())
+    }
+
+    @Test
+    fun invalidateDuringRefreshDoesNotCacheTheStaleOutcome() = runBlocking {
+        withTimeout(10_000) {
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val s = AccessSession(
+                fetcher = { _ ->
+                    if (calls.incrementAndGet() == 1) {
+                        entered.complete(Unit)
+                        release.await()
+                    }
+                    BootstrapResult.Success(TestJwt.setCookie(TestJwt.unsigned(now + 3600)), now + 3600)
+                },
+                store = MemoryTokenStore(ServiceToken("fixture-id", "fixture-secret")),
+                installer = CookieInstaller("https://herdr.example", sink),
+                clock = clock,
+            )
+            val first = async { s.ensureFresh() }
+            entered.await()
+            s.invalidate()
+            release.complete(Unit)
+            first.await()
+            assertEquals(0, sink.installed.size)
+            s.ensureFresh()
+            assertEquals(2, calls.get())
+            assertEquals(1, sink.installed.size)
+        }
+    }
 }
