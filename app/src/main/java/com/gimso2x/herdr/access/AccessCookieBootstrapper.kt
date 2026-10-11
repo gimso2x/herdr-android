@@ -80,7 +80,7 @@ class AccessCookieBootstrapper(client: OkHttpClient, baseUrl: String) : CookieFe
         val value = header.substring(COOKIE_PREFIX.length).substringBefore(';').trim()
         if (value.isEmpty()) return BootstrapResult.StrictModeOrNoCookie
         val exp = jwtExpEpochSeconds(value) ?: return BootstrapResult.Unexpected(200)
-        return BootstrapResult.Success(header, exp)
+        return BootstrapResult.Success(header, exp, response.headers.getDate("Date")?.time)
     }
 
     private fun redirectsToAccess(response: Response): Boolean {

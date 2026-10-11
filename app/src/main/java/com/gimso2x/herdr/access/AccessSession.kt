@@ -6,9 +6,14 @@ import kotlinx.coroutines.sync.withLock
 
 /**
  * Keeps the Access cookie fresh. [ensureFresh] refreshes when there is no cookie, when forced, or
- * when `exp - now <= 300 s` (inclusive, so a scheduler waking at [nextRefreshAt] always refreshes).
- * Refreshes are single-flight: callers that arrive while a refresh runs share its outcome.
- * No stored token yields [BootstrapResult.InvalidToken] without a request.
+ * when the cookie has `<= 300 s` of life left (inclusive, so a scheduler waking at [nextRefreshAt]
+ * always refreshes). Refreshes are single-flight: callers that arrive while a refresh runs share
+ * its outcome. No stored token yields [BootstrapResult.InvalidToken] without a request.
+ *
+ * Remaining life is `exp - server time`, where server time is the response's `Date` header (the
+ * device wall clock only when the response carried none). It is turned into a deadline on the
+ * monotonic [Clock.elapsedMillis] at the moment the cookie arrives, so a wrong or edited device
+ * wall clock can neither postpone renewal past the server-side expiry nor trigger it early.
  */
 class AccessSession(
     private val fetcher: CookieFetcher,
@@ -23,6 +28,10 @@ class AccessSession(
     @Volatile
     private var current: BootstrapResult.Success? = null
 
+    /** [Clock.elapsedMillis] reading at which [current] expires on the server. */
+    @Volatile
+    private var expiresAtElapsed = 0L
+
     @Volatile
     private var lastResult: BootstrapResult? = null
 
@@ -31,15 +40,18 @@ class AccessSession(
         return mutex.withLock {
             if (generation.get() != seen) lastResult?.let { return@withLock it }
             val cached = current
-            if (!force && cached != null && !isDue(cached)) return@withLock cached
+            if (!force && cached != null && !isDue()) return@withLock cached
             refresh()
         }
     }
 
-    /** Epoch millis at which the next refresh is due; [now] when there is no cookie yet. */
+    /**
+     * Wall-clock millis, in the caller's [now] frame, at which the next refresh is due; [now] when
+     * there is no cookie yet. The distance is measured on the monotonic clock.
+     */
     fun nextRefreshAt(now: Long): Long {
-        val cached = current ?: return now
-        return cached.expEpochSeconds * 1000 - REFRESH_LEAD_MILLIS
+        if (current == null) return now
+        return now + (untilExpiry() - REFRESH_LEAD_MILLIS)
     }
 
     /**
@@ -53,8 +65,9 @@ class AccessSession(
         generation.incrementAndGet()
     }
 
-    private fun isDue(cookie: BootstrapResult.Success): Boolean =
-        cookie.expEpochSeconds * 1000 - clock.nowMillis() <= REFRESH_LEAD_MILLIS
+    private fun untilExpiry(): Long = expiresAtElapsed - clock.elapsedMillis()
+
+    private fun isDue(): Boolean = untilExpiry() <= REFRESH_LEAD_MILLIS
 
     private suspend fun refresh(): BootstrapResult {
         val startedAt = generation.get()
@@ -63,6 +76,8 @@ class AccessSession(
         if (generation.get() != startedAt) return result // invalidated mid-flight: do not cache
         if (result is BootstrapResult.Success) {
             installer.install(result.setCookieHeader)
+            val serverNow = result.serverTimeMillis ?: clock.nowMillis()
+            expiresAtElapsed = clock.elapsedMillis() + (result.expEpochSeconds * 1000 - serverNow)
             current = result
         }
         lastResult = result

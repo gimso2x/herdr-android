@@ -117,9 +117,9 @@ class AccessSessionTest {
         val before = clock.nowMillis
         assertEquals("no cookie: due now", before, s.nextRefreshAt(before))
         s.ensureFresh()
-        val exp = now + 3600
-        assertEquals((exp - 300) * 1000, s.nextRefreshAt(before))
-        assertEquals((exp - 300) * 1000, s.nextRefreshAt(before + 5_000))
+        assertEquals(before + 3_300_000L, s.nextRefreshAt(before))
+        // The distance is measured on the monotonic clock, so it is relative to the caller's `now`.
+        assertEquals(before + 5_000 + 3_300_000L, s.nextRefreshAt(before + 5_000))
     }
 
     @Test
@@ -232,5 +232,77 @@ class AccessSessionTest {
             assertEquals(2, calls.get())
             assertEquals(1, sink.installed.size)
         }
+    }
+
+    /** Wall clock and monotonic clock move independently, like a device whose wall clock is wrong. */
+    private class SkewClock(var wall: Long, var elapsed: Long) : Clock {
+        override fun nowMillis(): Long = wall
+        override fun elapsedMillis(): Long = elapsed
+    }
+
+    private val serverNow = now * 1000
+
+    private fun skewedSession(clock: SkewClock, withDate: Boolean = true) = AccessSession(
+        fetcher = { _ ->
+            calls.incrementAndGet()
+            val exp = now + 3600 // one-hour cookie issued at server time
+            BootstrapResult.Success(
+                TestJwt.setCookie(TestJwt.unsigned(exp)),
+                exp,
+                if (withDate) serverNow else null,
+            )
+        },
+        store = MemoryTokenStore(ServiceToken("fixture-id", "fixture-secret")),
+        installer = CookieInstaller("https://herdr.example", sink),
+        clock = clock,
+    )
+
+    @Test
+    fun deviceTenMinutesBehindStillRenewsFiftyFiveMinutesAfterIssue() = runBlocking {
+        val clock = SkewClock(wall = serverNow - 600_000, elapsed = 5_000)
+        val s = skewedSession(clock)
+        s.ensureFresh()
+        val wall = clock.wall
+        assertEquals("55 min from now, not 65", wall + 3_300_000L, s.nextRefreshAt(wall))
+        clock.elapsed += 3_299_999L
+        clock.wall += 3_299_999L
+        s.ensureFresh()
+        assertEquals(1, calls.get())
+        clock.elapsed += 1L
+        clock.wall += 1L
+        s.ensureFresh()
+        assertEquals(2, calls.get())
+    }
+
+    @Test
+    fun deviceTenMinutesAheadDoesNotRenewEarly() = runBlocking {
+        val clock = SkewClock(wall = serverNow + 600_000, elapsed = 5_000)
+        val s = skewedSession(clock)
+        s.ensureFresh()
+        assertEquals(clock.wall + 3_300_000L, s.nextRefreshAt(clock.wall))
+        s.ensureFresh()
+        assertEquals("a cookie with 60 min of life is not due", 1, calls.get())
+    }
+
+    @Test
+    fun wallClockJumpsDoNotMoveTheDeadline() = runBlocking {
+        val clock = SkewClock(wall = serverNow, elapsed = 5_000)
+        val s = skewedSession(clock)
+        s.ensureFresh()
+        clock.wall += 7_200_000L // user sets the clock two hours ahead
+        s.ensureFresh()
+        assertEquals(1, calls.get())
+        clock.wall -= 14_400_000L // and then two hours behind
+        clock.elapsed += 3_300_000L // while 55 real minutes pass
+        s.ensureFresh()
+        assertEquals(2, calls.get())
+    }
+
+    @Test
+    fun withoutServerDateTheDeviceClockIsTheFallback() = runBlocking {
+        val clock = SkewClock(wall = serverNow - 600_000, elapsed = 5_000)
+        val s = skewedSession(clock, withDate = false)
+        s.ensureFresh()
+        assertEquals("device clock taken at face value", clock.wall + 3_900_000L, s.nextRefreshAt(clock.wall))
     }
 }

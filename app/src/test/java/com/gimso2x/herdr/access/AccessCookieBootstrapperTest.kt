@@ -45,7 +45,25 @@ class AccessCookieBootstrapperTest {
     fun ok200WithCookieIsSuccessWithExp() {
         val header = TestJwt.setCookie(TestJwt.unsigned(exp))
         server.enqueue(okWithCookie(header))
-        assertEquals(BootstrapResult.Success(header, exp), fetch())
+        val success = fetch() as BootstrapResult.Success
+        assertEquals(header, success.setCookieHeader)
+        assertEquals(exp, success.expEpochSeconds)
+    }
+
+    @Test
+    fun successCarriesTheServerDateHeaderAsServerTime() {
+        server.enqueue(
+            okWithCookie(TestJwt.setCookie(TestJwt.unsigned(exp)))
+                .setHeader("Date", "Sun, 06 Nov 1994 08:49:37 GMT"),
+        )
+        val success = fetch() as BootstrapResult.Success
+        assertEquals(784111777000L, success.serverTimeMillis)
+    }
+
+    @Test
+    fun missingOrMalformedDateHeaderLeavesServerTimeUnknown() {
+        server.enqueue(okWithCookie(TestJwt.setCookie(TestJwt.unsigned(exp))).setHeader("Date", "not a date"))
+        assertEquals(null, (fetch() as BootstrapResult.Success).serverTimeMillis)
     }
 
     @Test

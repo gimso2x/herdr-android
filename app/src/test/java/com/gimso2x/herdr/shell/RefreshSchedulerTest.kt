@@ -1,7 +1,13 @@
 package com.gimso2x.herdr.shell
 
+import com.gimso2x.herdr.access.AccessSession
 import com.gimso2x.herdr.access.BootstrapResult
 import com.gimso2x.herdr.access.Clock
+import com.gimso2x.herdr.access.CookieInstaller
+import com.gimso2x.herdr.access.CookieSink
+import com.gimso2x.herdr.access.MemoryTokenStore
+import com.gimso2x.herdr.access.ServiceToken
+import com.gimso2x.herdr.access.TestJwt
 import com.gimso2x.herdr.ui.SetupError
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -141,5 +147,55 @@ class RefreshSchedulerTest {
         assertEquals(BackAction.HIDE_IME, BackPolicy.actionFor(imeVisible = true, canGoBack = false))
         assertEquals(BackAction.GO_BACK, BackPolicy.actionFor(imeVisible = false, canGoBack = true))
         assertEquals(BackAction.EXIT, BackPolicy.actionFor(imeVisible = false, canGoBack = false))
+    }
+
+    private class SkewClock(var wall: Long, var elapsed: Long) : Clock {
+        override fun nowMillis(): Long = wall
+        override fun elapsedMillis(): Long = elapsed
+    }
+
+    private class NullSink : CookieSink {
+        override fun setCookie(url: String, value: String) = Unit
+        override fun flush() = Unit
+    }
+
+    /** A one-hour cookie issued at [serverNow] (server Date header) to a device whose clock is off by [skew]. */
+    private fun renewalSleeps(skew: Long): List<Long> {
+        val serverNow = 1_800_000_000_000L
+        val exp = serverNow / 1000 + 3600
+        val clock = SkewClock(wall = serverNow + skew, elapsed = 10_000L)
+        var fetches = 0
+        val session = AccessSession(
+            fetcher = {
+                fetches++
+                BootstrapResult.Success(TestJwt.setCookie(TestJwt.unsigned(exp)), exp, serverNow)
+            },
+            store = MemoryTokenStore(ServiceToken("fixture-id", "fixture-secret")),
+            installer = CookieInstaller("https://herdr.example", NullSink()),
+            clock = clock,
+        )
+        runBlocking { session.ensureFresh() }
+        val sleeps = mutableListOf<Long>()
+        val scheduler = RefreshScheduler(
+            clock = clock,
+            sleeper = { ms ->
+                sleeps += ms
+                clock.wall += ms
+                clock.elapsed += ms
+            },
+            nextRefreshAt = { now -> session.nextRefreshAt(now) },
+            refresh = { session.ensureFresh() },
+        )
+        runBlocking { scheduler.step() }
+        assertEquals("the sleep ended with a real renewal", 2, fetches)
+        return sleeps
+    }
+
+    @Test
+    fun renewalSleepIgnoresDeviceClockSkew() {
+        val fiftyFiveMinutes = 3_300_000L
+        assertEquals(listOf(fiftyFiveMinutes), renewalSleeps(skew = -600_000L)) // device 10 min behind
+        assertEquals(listOf(fiftyFiveMinutes), renewalSleeps(skew = 600_000L)) // device 10 min ahead
+        assertEquals(listOf(fiftyFiveMinutes), renewalSleeps(skew = 0L))
     }
 }

@@ -1,8 +1,16 @@
 package com.gimso2x.herdr.access
 
 sealed interface BootstrapResult {
-    /** [setCookieHeader] is the full `Set-Cookie` header value; it is never printed by [toString]. */
-    data class Success(val setCookieHeader: String, val expEpochSeconds: Long) : BootstrapResult {
+    /**
+     * [setCookieHeader] is the full `Set-Cookie` header value; it is never printed by [toString].
+     * [serverTimeMillis] is the response's `Date` header (server time, epoch millis) when present:
+     * the cookie's remaining lifetime is `exp - serverTime`, independent of the device wall clock.
+     */
+    data class Success(
+        val setCookieHeader: String,
+        val expEpochSeconds: Long,
+        val serverTimeMillis: Long? = null,
+    ) : BootstrapResult {
         override fun toString(): String = "Success(exp=$expEpochSeconds)"
     }
 
