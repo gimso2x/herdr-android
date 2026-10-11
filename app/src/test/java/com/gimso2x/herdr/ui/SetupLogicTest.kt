@@ -59,4 +59,17 @@ class SetupLogicTest {
         assertEquals("…", SetupLogic.maskClientId(""))
         assertEquals("abcd…", SetupLogic.maskClientId("  abcdef"))
     }
+
+    @Test
+    fun serverChangeRecoveryAsksForCredentialsWhenTheTokenCannotBeReused() {
+        // Token present and not rejected: reuse it, ask for the address only.
+        for (error in listOf(SetupError.NETWORK, SetupError.NO_COOKIE, SetupError.UNEXPECTED, SetupError.STORE_FAILED)) {
+            assertTrue(error.name, SetupLogic.addressOnlyRecovery(hasToken = true, error = error))
+        }
+        // Rejected by the new Access application, or no token at all: full credential entry.
+        assertFalse(SetupLogic.addressOnlyRecovery(hasToken = true, error = SetupError.REJECTED))
+        for (error in SetupError.entries) {
+            assertFalse(error.name, SetupLogic.addressOnlyRecovery(hasToken = false, error = error))
+        }
+    }
 }

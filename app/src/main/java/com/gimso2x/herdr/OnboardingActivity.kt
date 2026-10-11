@@ -115,7 +115,13 @@ class OnboardingActivity : ComponentActivity() {
     private fun finishOnboarding() {
         prefs.notificationPermissionAsked = true
         prefs.onboardingDone = true
-        startActivity(Intent(this, MainActivity::class.java))
+        // A page requested before setup (carried by SetupActivity) is opened now.
+        val target = intent.getStringExtra(MainActivity.EXTRA_OPEN_URL)
+        startActivity(
+            Intent(this, MainActivity::class.java).apply {
+                if (target != null) putExtra(MainActivity.EXTRA_OPEN_URL, target)
+            },
+        )
         finish()
     }
 

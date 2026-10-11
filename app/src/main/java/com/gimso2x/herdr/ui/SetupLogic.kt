@@ -35,6 +35,12 @@ object SetupLogic {
         return ServiceToken(id, secret)
     }
 
+    /**
+     * Whether failed server-change recovery may ask for the address only (the stored token is reused).
+     * With no token, or one the new Access application rejects, credentials have to be entered again.
+     */
+    fun addressOnlyRecovery(hasToken: Boolean, error: SetupError): Boolean = hasToken && error != SetupError.REJECTED
+
     /** Null for [BootstrapResult.Success]. */
     fun errorFor(result: BootstrapResult): SetupError? = when (result) {
         is BootstrapResult.Success -> null

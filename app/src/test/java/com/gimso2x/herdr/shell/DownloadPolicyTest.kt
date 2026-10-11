@@ -153,4 +153,46 @@ class DownloadPolicyTest {
         // real host is foreign while the override is active
         assertTrue(decide("https://herdr.example.com/f", null, null, fixture) is DownloadDecision.External)
     }
+
+    @Test
+    fun freeNameIsKept() {
+        assertEquals("output.txt", DownloadPolicy.uniqueFileName("output.txt") { false })
+    }
+
+    @Test
+    fun repeatedDownloadsGetNumberedNamesKeepingExtension() {
+        val taken = mutableSetOf<String>()
+        val names = List(4) { DownloadPolicy.uniqueFileName("output.txt") { it in taken }.also { taken += it } }
+        assertEquals(listOf("output.txt", "output (1).txt", "output (2).txt", "output (3).txt"), names)
+    }
+
+    @Test
+    fun sameBasenameFromDifferentPathsDoesNotCollide() {
+        val taken = mutableSetOf<String>()
+        val first = DownloadPolicy.uniqueFileName("report.tar.gz") { it in taken }.also { taken += it }
+        val second = DownloadPolicy.uniqueFileName("report.tar.gz") { it in taken }.also { taken += it }
+        assertEquals("report.tar.gz", first)
+        assertEquals("report.tar (1).gz", second)
+        assertEquals("download (1)", DownloadPolicy.uniqueFileName("download") { it == "download" })
+    }
+
+    @Test
+    fun uniqueNameStaysWithinTheLengthBound() {
+        val long = "a".repeat(115) + ".txt"
+        val name = DownloadPolicy.uniqueFileName(long) { it == long }
+        assertTrue(name, name.length <= 120)
+        assertTrue(name, name.endsWith(" (1).txt"))
+    }
+
+    @Test
+    fun uniqueNameAlwaysTerminates() {
+        val name = DownloadPolicy.uniqueFileName("x.bin") { true }
+        assertTrue(name, name.startsWith("x (") && name.endsWith(").bin"))
+    }
+
+    @Test
+    fun unescapedQueryCharactersStillEnqueueOnTheBaseOrigin() {
+        val decision = decide("https://herdr.example.com/f?q=a[1]|b^c")
+        assertTrue(decision.toString(), decision is DownloadDecision.Enqueue)
+    }
 }

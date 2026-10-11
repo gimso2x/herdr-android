@@ -1,6 +1,5 @@
 package com.gimso2x.herdr.shell
 
-import java.net.URI
 import java.util.Locale
 
 /** What to do with a WebView download. */
@@ -53,6 +52,29 @@ object DownloadPolicy {
         return if (cleaned.length > MAX_NAME) cleaned.takeLast(MAX_NAME).trimStart('.', ' ').ifEmpty { FALLBACK_NAME } else cleaned
     }
 
+    private const val MAX_UNIQUE_TRIES = 9_999
+
+    /**
+     * [name] if [exists] says it is free, else `base (1).ext`, `base (2).ext`, ... (readable basename and
+     * extension kept, total length bounded). DownloadManager never overwrites and fails a request whose
+     * destination exists, so every enqueue goes through this.
+     */
+    fun uniqueFileName(name: String, exists: (String) -> Boolean): String {
+        if (!exists(name)) return name
+        val dot = name.lastIndexOf('.')
+        val base = if (dot > 0) name.substring(0, dot) else name
+        val ext = if (dot > 0) name.substring(dot) else ""
+        fun candidate(suffix: String): String {
+            val room = (MAX_NAME - ext.length - suffix.length).coerceAtLeast(1)
+            return base.take(room) + suffix + ext
+        }
+        for (i in 1..MAX_UNIQUE_TRIES) {
+            val next = candidate(" ($i)")
+            if (!exists(next)) return next
+        }
+        return candidate(" (${java.util.UUID.randomUUID().toString().take(8)})")
+    }
+
     fun normalizeMime(raw: String?): String {
         val base = raw?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT).orEmpty()
         return if (base.matches(MIME)) base else FALLBACK_MIME
@@ -60,12 +82,5 @@ object DownloadPolicy {
 
     private val MIME = Regex("""[a-z0-9][a-z0-9!#&^_.+-]*/[a-z0-9][a-z0-9!#&^_.+-]*""")
 
-    private fun isWebUrl(url: String): Boolean {
-        val scheme = try {
-            URI(url).scheme?.lowercase(Locale.ROOT)
-        } catch (_: Exception) {
-            null
-        }
-        return scheme == "http" || scheme == "https"
-    }
+    private fun isWebUrl(url: String): Boolean = WebUrls.parse(url) != null
 }

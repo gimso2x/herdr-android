@@ -2,28 +2,49 @@
 # Emulator QA harness. Run as the android-emulator-runner `script` (the emulator is already booted):
 #
 #   ci/instrumented.sh <api-level> [--tier fast|full]    (default tier: full)
+#   ci/instrumented.sh --validate-dispatch               (plan job: validates the dispatch inputs, prints outputs)
 #
-# This script is the single source of truth for which phases run where:
+# This script is the single source of truth for which phases run where (lists in ci/qa-lib.sh):
 #   full: API 34 runs every phase (incl. live L1-L4); any other API only the lifecycle/inset subset
 #         (F5, F6, W1-W4) plus the onboarding phase O1 and U1.
 #   fast: the same lists minus the live groups L1-L4 (fixture-only; no credentials, no live server).
 # QA_PHASES (space separated group ids, e.g. "L1 W3") restricts a run for debugging; a normal run
-# leaves it empty. Credentials (full tier only): the workflow writes $RUNNER_TEMP/qa-token.json, this
+# leaves it empty. Every requested id must be a supported id of the tier/API, otherwise the run is
+# refused before anything starts. A phase passes only with a successful runner exit and the exact number
+# of executed tests (OK (N tests), N from the @Test methods of the class); zero tests never pass.
+# Credentials (full tier only): the workflow writes $RUNNER_TEMP/qa-token.json, this
 # script pushes it to /data/local/tmp and the trap removes both. No `set -x`, nothing secret is echoed.
+# The debug build runs as com.gimso2x.herdr.debug (applicationIdSuffix), never as the production package.
 set -uo pipefail
 cd "$(dirname "$0")/.."
+# shellcheck source=ci/qa-lib.sh
+source ci/qa-lib.sh
+
+if [ "${1:-}" = "--validate-dispatch" ]; then qa_validate_dispatch; exit $?; fi
 
 API="${1:?usage: ci/instrumented.sh <api-level> [--tier fast|full]}"
+[[ "$API" =~ ^[0-9]+$ ]] || { echo "invalid api level: '$API'" >&2; exit 2; }
 TIER=full
 if [ "${2:-}" = "--tier" ]; then TIER="${3:?--tier needs fast or full}"; elif [ -n "${2:-}" ]; then echo "unknown argument: $2" >&2; exit 2; fi
 case "$TIER" in fast|full) ;; *) echo "unknown tier: $TIER (fast|full)" >&2; exit 2 ;; esac
-PKG=com.gimso2x.herdr
-RUNNER=com.gimso2x.herdr.test/androidx.test.runner.AndroidJUnitRunner
-TEST_PKG=com.gimso2x.herdr.qa
+PKG=$QA_PKG
+RUNNER=$QA_RUNNER
+TEST_PKG=$QA_TEST_PKG
 OUT=qa-screens
 TOKEN_FILE="${RUNNER_TEMP:?RUNNER_TEMP is required}/qa-token.json"
 DEVICE_TOKEN=/data/local/tmp/qa-token.json
 PHASE_TIMEOUT=480
+
+# Which groups this run may and does select. Validated before any device work: an unknown or unavailable id
+# (a typo, a live group on the fast tier) fails here instead of producing a green run that ran nothing.
+QA_PHASES=$(qa_normalize_phases)
+declare -n CLASSES=QA_CLASSES
+FULL_ORDER=$QA_FULL_ORDER
+LIVE_GROUPS=$QA_LIVE_GROUPS
+PROBE_GROUPS=$QA_PROBE_GROUPS
+named=0; [ -n "$QA_PHASES" ] && named=1
+ALLOWED=$(qa_allowed "$API" "$TIER" "$named")
+qa_validate_phase_ids "$API" "$TIER" || exit 2
 
 mkdir -p "$OUT"
 MEM_LOG="$(mktemp)"
@@ -41,17 +62,25 @@ EMULATOR_LOG=/tmp/emulator.log
 FAILED=()
 RAN=()
 
-# The repository is public and L1-L4 run against the owner's live herdr: their screenshots (l1.png,
-# L*-fail.png), logcat dumps and fact files can show workspace labels or pane titles, so they never
-# stay in $OUT (which is uploaded). The pixel gate and the plain phase outputs (L*.txt) stay.
+# The repository is public and the live classes (QA_LIVE_GROUPS: L1-L4 and the P1 render probe) run against the
+# owner's live herdr: their screenshots (l1.png, <class>-fail.png, <class>-device.png), logcat dumps and fact
+# files can show workspace labels or pane titles, so none of it is ever collected into $OUT (which is uploaded).
+# Purged by the live class list, on the device before anything is pulled and on the host afterwards. The
+# plain phase outputs (<class>.txt: runner result lines) stay.
 purge_live_evidence() {
-  rm -f "$OUT"/l1.png "$OUT"/L[1-4]*-fail.png "$OUT"/L[1-4]*Test-*.txt
+  local c
+  timeout 30 adb shell "rm -f $QA_DEVICE_OUT/l1.png $QA_DEVICE_OUT/L[1-4]*-fail.png" >/dev/null 2>&1 || true
+  for c in $(qa_live_classes); do
+    timeout 30 adb shell "rm -f $QA_DEVICE_OUT/$c-* $QA_DEVICE_OUT/$c.png" >/dev/null 2>&1 || true
+  done
+  qa_purge_live_dir "$OUT"
 }
 
 cleanup() {
   kill "$SAMPLER" "${EV_PID:-}" "${PROBE_PID:-}" 2>/dev/null || true
-  adb pull /sdcard/Download/qa/. "$OUT/" >/dev/null 2>&1 || true
   purge_live_evidence
+  timeout 60 adb pull "$QA_DEVICE_OUT/." "$OUT/" >/dev/null 2>&1 || true
+  qa_purge_live_dir "$OUT"
   adb shell rm -f "$DEVICE_TOKEN" >/dev/null 2>&1 || true
   rm -f "$TOKEN_FILE"
 }
@@ -62,35 +91,12 @@ fail() {
   FAILED+=("$*")
 }
 
-declare -A CLASSES=(
-  [L1]="L1LiveLoadTest" [L2]="L2BadTokenTest" [L3]="L3ExpiryRecoveryTest" [L4]="L4LiveDownloadTest"
-  [G1]="G1GuardFixtureTest" [A1]="A1RenewalTest" [A2]="A2RenewalRejectedTest"
-  [F1]="F1ExternalPopupTest" [F2]="F2RotationTest" [F3]="F3RecreateTest" [F4]="F4BackOrderTest" [F5]="F5ImeResizeTest" [F6]="F6ViewportUnitsTest"
-  [C1]="C1FileChooserTest" [C2]="C2MicGrantTest" [C3]="C3MicDenyTest" [C4]="C4ClipboardTest" [C5]="C5FixtureDownloadTest"
-  [R1]="R1ServedRevisionTest"
-  [W1]="W1NotifyTest" [W2]="W2TapNotificationTest" [W3]="W3SeedOnTest W3SeedOffTest W3ToggleTest" [W4]="W4PermissionOffTest"
-  [O1]="O1SetupToOnboardingTest O1MainStartShowsOnboardingTest O1ButtonsTest O1StartTest O1WatchNotificationTest"
-  [O2]="O2PermissionRequestTest"
-  [U1]="U1UpgradePathTest U2SettingsChangeTest"
-  [Sstore]="SStoreWriteTest SStoreReadTest" [Scookie]="SCookieWipeTest"
-  [P0]="P0RenderProbeFixtureTest" [P1]="P1RenderProbeLiveTest"
-)
-FULL_ORDER="L1 L2 L3 L4 G1 A1 A2 F1 F2 F3 F4 F5 F6 C1 C2 C3 C4 C5 R1 W1 W2 W3 W4 O1 O2 U1 Sstore Scookie"
-SUBSET_ORDER="F5 F6 W1 W2 W3 W4 O1 U1"
-LIVE_GROUPS="L1 L2 L3 L4"
-if [ "$API" = "34" ]; then ALLOWED="$FULL_ORDER"; else ALLOWED="$SUBSET_ORDER"; fi
-if [ "$TIER" = "fast" ]; then
-  # Fast tier: fixture phases only. Drop the live groups (they need the owner's live server).
-  FAST_ALLOWED=""
-  for g in $ALLOWED; do
-    [[ " $LIVE_GROUPS " == *" $g "* ]] || FAST_ALLOWED+="$g "
-  done
-  ALLOWED="${FAST_ALLOWED% }"
-fi
 # Debug runs that name phases (QA_PHASES) may run any group on any API, plus the render probes P0 (fixture
 # page) and P1 (live page): counts of canvases/WebGL/images/WebSocket bytes, logged to tag RenderProbe.
-PROBE_GROUPS="P0 P1"
-if [ "$TIER" = "full" ] && [ -n "${QA_PHASES:-}" ]; then ALLOWED="$FULL_ORDER $PROBE_GROUPS"; fi
+# (The class map, the group lists and the live classification live in ci/qa-lib.sh.)
+EXPECTED_COUNTS="$(qa_expected_counts "$QA_TEST_SRC")"
+expected_count() { awk -v c="$1" '$1 == c { print $2 }' <<<"$EXPECTED_COUNTS"; }
+OKCLS=()
 
 selected() {
   [[ " $ALLOWED " == *" $1 "* ]] || return 1

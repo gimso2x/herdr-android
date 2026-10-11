@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -35,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.AndroidViewModel
@@ -72,7 +74,11 @@ class SettingsActivity : ComponentActivity() {
                     model = model,
                     onBack = { finish() },
                     onReplaceToken = { startActivity(SetupActivity.intent(this)) },
-                    onServerChangeFailed = { startActivity(SetupActivity.intent(this, it, addressOnly = true)) },
+                    onServerChangeFailed = { error ->
+                        // Without a token, or when the new Access application rejects it, the address alone cannot fix it.
+                        val addressOnly = SetupLogic.addressOnlyRecovery(model.maskedClientId != null, error)
+                        startActivity(SetupActivity.intent(this, error, addressOnly = addressOnly))
+                    },
                     onOpenNotificationSettings = {
                         startActivity(
                             Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
@@ -129,6 +135,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             withContext(Dispatchers.IO) { app.tokenStore.clear() }
             CookieManager.getInstance().removeAllCookies(null)
             CookieManager.getInstance().flush()
+            // Cached bootstrap result, web storage and the running page of MainActivity go with the token.
+            app.endSession(SessionEnd.SIGN_OUT)
             maskedClientId = null
         }
     }
@@ -171,6 +179,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             WatcherController.stop(app)
             clearAllCookies()
             HerdrConfig.setServerAddress(address)
+            app.endSession(SessionEnd.SERVER_CHANGE)
             val outcome = RefreshOutcome.of(app.accessSession.ensureFresh(force = true))
             server = address
             serverInput = ""
@@ -257,13 +266,16 @@ private fun SettingsScreen(
 
             HorizontalDivider()
 
+            // One merged, toggleable unit: accessibility services read the label as the switch's name.
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .toggleable(value = model.alertsEnabled, role = Role.Switch, onValueChange = model::setAlerts),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(stringResource(R.string.settings_alerts), style = MaterialTheme.typography.titleMedium)
-                Switch(checked = model.alertsEnabled, onCheckedChange = model::setAlerts)
+                Switch(checked = model.alertsEnabled, onCheckedChange = null)
             }
             if (!model.notificationsEnabled) {
                 Text(

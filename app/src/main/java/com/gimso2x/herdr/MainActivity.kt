@@ -10,7 +10,9 @@ import android.os.Build
 import android.os.Bundle
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -122,6 +124,18 @@ class MainActivity : ComponentActivity() {
     /** A failure sent the owner to setup; reload the last page when setup comes back with a token. */
     private var reloadAfterSetup = false
 
+    /** In-app URL of the last failed main-frame load; the retry action loads exactly this page. */
+    private var failedUrl: String? = null
+
+    /** Set while a sign-out/server-change wipe is settling: errors of the page being torn down are not failures. */
+    private var ignoreLoadErrors = false
+
+    /** about:blank was loaded by a wipe; its history entry is dropped once it finished. */
+    private var blankPending = false
+
+    /** The token was removed: setup is opened without a rejection message. */
+    private var signedOut = false
+
     // Asked once per install before the watcher starts; the watcher never depends on the answer.
     private val notificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -187,8 +201,17 @@ class MainActivity : ComponentActivity() {
         pendingStartUrl?.let { setStartUrl(it) }
         // A recreated activity gets the original launch intent again; its pane was already consumed.
         if (savedInstanceState == null) {
-            paneUrl(intent)?.let { navigate(it) }
+            (paneUrl(intent) ?: openUrl(intent))?.let { navigate(it) }
             intent.removeExtra(EXTRA_PANE_ID)
+            intent.removeExtra(EXTRA_OPEN_URL)
+        }
+        var handledSessionEnd = app.sessionEnd.value.serial
+        lifecycleScope.launch {
+            app.sessionEnd.collect { event ->
+                if (event.serial == handledSessionEnd) return@collect
+                handledSessionEnd = event.serial
+                event.kind?.let(::onSessionEnded)
+            }
         }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -234,11 +257,14 @@ class MainActivity : ComponentActivity() {
                 started.first { it }
                 // Every resume renews if due, independent of alerts; then sleep until the next due time.
                 val first = RefreshOutcome.of(app.accessSession.ensureFresh())
-                if (first is RefreshOutcome.Fresh) setupOpened = false
+                if (first is RefreshOutcome.Fresh) {
+                    setupOpened = false
+                    signedOut = false
+                }
                 resetIfOriginChanged()
                 val failure = (first as? RefreshOutcome.NeedsSetup) ?: scheduler.run()
                 // Once per failure episode: backing out of setup must not bounce straight back into it.
-                if (!setupOpened) openSetup(failure.error)
+                if (!setupOpened) openSetup(if (signedOut) null else failure.error)
             }
         }
         startFlow()
@@ -272,10 +298,15 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val pane = paneUrl(intent)
+        // The requested pane (notification) or the target carried through setup/onboarding wins over lastUrl().
+        val target = paneUrl(intent) ?: openUrl(intent)
         intent.removeExtra(EXTRA_PANE_ID)
+        intent.removeExtra(EXTRA_OPEN_URL)
         when {
-            pane != null -> navigate(pane)
+            target != null -> {
+                reloadAfterSetup = false
+                navigate(target)
+            }
             reloadAfterSetup -> {
                 reloadAfterSetup = false
                 navigate(lastUrl())
@@ -348,8 +379,20 @@ class MainActivity : ComponentActivity() {
                 if (url != null && url.startsWith("http") && policy.isInApp(url)) lastHerdrUrl = url
             }
 
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                if (request.isForMainFrame) onMainFrameFailed(request.url.toString())
+            }
+
+            override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+                if (request.isForMainFrame && errorResponse.statusCode >= 400) onMainFrameFailed(request.url.toString())
+            }
+
             override fun onPageFinished(view: WebView, url: String?) {
-                if (clearHistoryOnFinish && url != null && policy.isInApp(url)) {
+                if (blankPending && url == "about:blank") {
+                    blankPending = false
+                    view.clearHistory()
+                }
+                if (clearHistoryOnFinish && url != null && url.startsWith("http") && policy.isInApp(url)) {
                     clearHistoryOnFinish = false
                     view.clearHistory()
                 }
@@ -360,7 +403,9 @@ class MainActivity : ComponentActivity() {
             }
         }
         view.webChromeClient = chromeClient
-        view.setDownloadListener(HerdrDownloadListener(this, { HerdrConfig.baseUrl }, ::launchExternal))
+        view.setDownloadListener(
+            HerdrDownloadListener(this, lifecycleScope, { HerdrConfig.baseUrl }, ::launchExternal, ::renewForDownload),
+        )
         // Must precede every page load (including restoreState) so the live site is never unguarded.
         LiveQaGuard.installIfEnabled(this, view)
         return view
@@ -375,10 +420,60 @@ class MainActivity : ComponentActivity() {
 
     private fun lastUrl(): String = lastHerdrUrl?.takeIf { policy.isInApp(it) } ?: rootUrl()
 
+    /** Every page load of ours goes through here: it clears the failure state of the previous one. */
+    private fun loadPage(url: String) {
+        showRetry = false
+        failedUrl = null
+        ignoreLoadErrors = false
+        webView.loadUrl(url)
+    }
+
+    /** A main-frame load of an in-app page failed (transport error or HTTP >= 400): offer the retry action. */
+    private fun onMainFrameFailed(url: String) {
+        if (ignoreLoadErrors || !url.startsWith("http") || !policy.isInApp(url)) return
+        failedUrl = url
+        keepSplash = false
+        showRetry = true
+    }
+
+    /** Refreshes authentication first (startFlow), then loads the page that failed. */
     private fun retry() {
-        startUrl = lastHerdrUrl?.takeIf { policy.isInApp(it) }
+        startUrl = (failedUrl ?: lastHerdrUrl)?.takeIf { policy.isInApp(it) }
         startFlow()
     }
+
+    /** Token removed or server changed: nothing of the old session may stay in the WebView. */
+    private fun onSessionEnded(kind: SessionEnd) {
+        ignoreLoadErrors = true
+        showRetry = false
+        failedUrl = null
+        pendingState = null
+        pendingStartUrl = null
+        pendingPaneUrl = null
+        blankPending = true
+        clearHistoryOnFinish = true
+        webView.stopLoading()
+        webView.loadUrl("about:blank")
+        webView.clearHistory()
+        webView.clearCache(true)
+        if (kind == SessionEnd.SIGN_OUT) {
+            signedOut = true
+            startUrl = null
+            lastHerdrUrl = null
+            reloadAfterSetup = true
+        }
+    }
+
+    /** Forced renewal for a download whose cookie was rejected; setup when the token itself is. */
+    private suspend fun renewForDownload(): Boolean =
+        when (val outcome = RefreshOutcome.of(app.accessSession.ensureFresh(force = true))) {
+            RefreshOutcome.Fresh -> true
+            RefreshOutcome.KeepPage -> false
+            is RefreshOutcome.NeedsSetup -> {
+                openSetup(outcome.error)
+                false
+            }
+        }
 
     /**
      * The address was changed while this activity was alive: forget everything of the old origin
@@ -397,7 +492,7 @@ class MainActivity : ComponentActivity() {
         reloadAfterSetup = false
         clearHistoryOnFinish = true
         webView.clearHistory()
-        webView.loadUrl(rootUrl())
+        loadPage(rootUrl())
     }
 
     /** No token or no server address -> setup; else a fresh session, then restore the saved page or load [startUrl]. */
@@ -410,7 +505,7 @@ class MainActivity : ComponentActivity() {
             }
             if (!hasToken || !configured) {
                 // An update from a build without the address field: the token is kept, only the address is asked.
-                startActivity(SetupActivity.intent(this@MainActivity, addressOnly = hasToken))
+                startActivity(SetupActivity.intent(this@MainActivity, addressOnly = hasToken, nextUrl = pendingTarget()))
                 finish()
                 return@launch
             }
@@ -425,7 +520,7 @@ class MainActivity : ComponentActivity() {
                     showRetry = true
                 }
                 is RefreshOutcome.NeedsSetup -> {
-                    startActivity(SetupActivity.intent(this@MainActivity, outcome.error))
+                    startActivity(SetupActivity.intent(this@MainActivity, outcome.error, nextUrl = pendingTarget()))
                     finish()
                 }
             }
@@ -448,8 +543,8 @@ class MainActivity : ComponentActivity() {
         // An explicit pane wins: load it on top of restored history (Back keeps working).
         val explicit = plan.explicitUrl
         when {
-            explicit != null -> webView.loadUrl(explicit)
-            !restored -> webView.loadUrl(plan.fallbackUrl)
+            explicit != null -> loadPage(explicit)
+            !restored -> loadPage(plan.fallbackUrl)
         }
     }
 
@@ -470,10 +565,11 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             when (val outcome = RefreshOutcome.of(app.accessSession.ensureFresh())) {
                 // On a transport failure the cookie may still be valid: try the page anyway.
-                RefreshOutcome.Fresh, RefreshOutcome.KeepPage -> webView.loadUrl(url)
+                RefreshOutcome.Fresh, RefreshOutcome.KeepPage -> loadPage(url)
                 is RefreshOutcome.NeedsSetup -> {
+                    // Setup carries the requested page back, so it is opened afterwards, not the previous one.
                     reloadAfterSetup = true
-                    startActivity(SetupActivity.intent(this@MainActivity, outcome.error))
+                    startActivity(SetupActivity.intent(this@MainActivity, outcome.error, nextUrl = url))
                 }
             }
         }
@@ -491,7 +587,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             try {
                 when (val outcome = RefreshOutcome.of(app.accessSession.ensureFresh(force = true))) {
-                    RefreshOutcome.Fresh -> webView.loadUrl(lastUrl())
+                    RefreshOutcome.Fresh -> loadPage(lastUrl())
                     RefreshOutcome.KeepPage -> showRetry = true
                     is RefreshOutcome.NeedsSetup -> {
                         reloadAfterSetup = true
@@ -504,7 +600,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun openSetup(error: SetupError) {
+    private fun openSetup(error: SetupError?) {
         setupOpened = true
         reloadAfterSetup = true
         startActivity(SetupActivity.intent(this, error))
@@ -541,6 +637,13 @@ class MainActivity : ComponentActivity() {
     private fun isImeVisible(): Boolean =
         ViewCompat.getRootWindowInsets(window.decorView)?.isVisible(WindowInsetsCompat.Type.ime()) == true
 
+    /** The page waiting for the first load (notification pane, restored start URL), to survive a setup detour. */
+    private fun pendingTarget(): String? = pendingPaneUrl ?: pendingStartUrl ?: startUrl
+
+    /** A target carried through setup/onboarding; only ever an in-app http(s) page of the current server. */
+    private fun openUrl(intent: Intent?): String? =
+        intent?.getStringExtra(EXTRA_OPEN_URL)?.takeIf { it.startsWith("http") && policy.isInApp(it) }
+
     private fun paneUrl(intent: Intent?): String? {
         val pane = intent?.getStringExtra(EXTRA_PANE_ID)?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         return DeepLink.paneUrl(HerdrConfig.baseUrl, pane)
@@ -549,6 +652,9 @@ class MainActivity : ComponentActivity() {
     companion object {
         /** Pane to open, set by status-watcher notifications. */
         const val EXTRA_PANE_ID = "pane_id"
+
+        /** In-app URL to open, carried through setup and onboarding back to MainActivity. */
+        const val EXTRA_OPEN_URL = "open_url"
 
         private const val KEY_WEBVIEW = "webview_state"
         private const val KEY_PENDING_START_URL = "pending_start_url"

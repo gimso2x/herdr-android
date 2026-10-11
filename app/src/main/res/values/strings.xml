@@ -60,4 +60,5 @@
 
     <string name="shell_network_error">서버에 연결할 수 없습니다</string>
     <string name="shell_retry">다시 시도</string>
+    <string name="shell_download_failed">다운로드할 수 없습니다. 잠시 후 다시 시도해 주세요</string>
 </resources>

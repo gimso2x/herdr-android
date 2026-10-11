@@ -74,7 +74,13 @@ class SetupActivity : ComponentActivity() {
                         } else {
                             OnboardingActivity::class.java
                         }
-                        startActivity(Intent(this@SetupActivity, next))
+                        // The page that was requested before setup was needed (e.g. a notification's pane) goes along.
+                        val target = intent.getStringExtra(EXTRA_NEXT_URL)
+                        startActivity(
+                            Intent(this@SetupActivity, next).apply {
+                                if (target != null) putExtra(MainActivity.EXTRA_OPEN_URL, target)
+                            },
+                        )
                         finish()
                     }
                 }
@@ -90,10 +96,19 @@ class SetupActivity : ComponentActivity() {
         /** Token already stored, only the server address is missing (first run after an update). */
         const val EXTRA_ADDRESS_ONLY = "address_only"
 
-        fun intent(context: Context, error: SetupError? = null, addressOnly: Boolean = false): Intent =
+        /** In-app URL MainActivity should open once setup succeeded (validated again by MainActivity). */
+        const val EXTRA_NEXT_URL = "next_url"
+
+        fun intent(
+            context: Context,
+            error: SetupError? = null,
+            addressOnly: Boolean = false,
+            nextUrl: String? = null,
+        ): Intent =
             Intent(context, SetupActivity::class.java).apply {
                 if (error != null) putExtra(EXTRA_ERROR, error.name)
                 if (addressOnly) putExtra(EXTRA_ADDRESS_ONLY, true)
+                if (nextUrl != null) putExtra(EXTRA_NEXT_URL, nextUrl)
             }
     }
 }
