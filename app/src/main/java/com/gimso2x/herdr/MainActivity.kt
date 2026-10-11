@@ -404,7 +404,7 @@ class MainActivity : ComponentActivity() {
         }
         view.webChromeClient = chromeClient
         view.setDownloadListener(
-            HerdrDownloadListener(this, lifecycleScope, { HerdrConfig.baseUrl }, ::launchExternal, ::renewForDownload),
+            HerdrDownloadListener(this, { HerdrConfig.baseUrl }, ::launchExternal, lifecycleScope, ::renewForDownload),
         )
         // Must precede every page load (including restoreState) so the live site is never unguarded.
         LiveQaGuard.installIfEnabled(this, view)
@@ -439,7 +439,7 @@ class MainActivity : ComponentActivity() {
     /** Refreshes authentication first (startFlow), then loads the page that failed. */
     private fun retry() {
         startUrl = (failedUrl ?: lastHerdrUrl)?.takeIf { policy.isInApp(it) }
-        startFlow()
+        startFlow(forceRefresh = true)
     }
 
     /** Token removed or server changed: nothing of the old session may stay in the WebView. */
@@ -496,7 +496,7 @@ class MainActivity : ComponentActivity() {
     }
 
     /** No token or no server address -> setup; else a fresh session, then restore the saved page or load [startUrl]. */
-    private fun startFlow() {
+    private fun startFlow(forceRefresh: Boolean = false) {
         showRetry = false
         startJob?.cancel()
         startJob = lifecycleScope.launch {
@@ -509,7 +509,7 @@ class MainActivity : ComponentActivity() {
                 finish()
                 return@launch
             }
-            when (val outcome = RefreshOutcome.of(app.accessSession.ensureFresh())) {
+            when (val outcome = RefreshOutcome.of(app.accessSession.ensureFresh(force = forceRefresh))) {
                 RefreshOutcome.Fresh -> {
                     loadInitialPage()
                     started.value = true

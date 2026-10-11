@@ -13,6 +13,7 @@ import com.gimso2x.herdr.R
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -24,16 +25,13 @@ import kotlinx.coroutines.withContext
  */
 class HerdrDownloadListener(
     private val context: Context,
-    private val scope: CoroutineScope,
     private val baseUrl: () -> String,
     private val openExternal: (String) -> Unit,
+    private val scope: CoroutineScope = MainScope(),
     /** Forces an Access cookie renewal; true when a fresh cookie is installed. */
-    private val renewAccess: suspend () -> Boolean,
+    private val renewAccess: suspend () -> Boolean = { false },
     private val preflight: DownloadPreflight = DownloadPreflight(),
 ) : DownloadListener {
-    /** Names handed to DownloadManager by this process whose files may not exist on disk yet. */
-    private val reserved = HashSet<String>()
-
     override fun onDownloadStart(
         url: String?,
         userAgent: String?,
@@ -80,8 +78,10 @@ class HerdrDownloadListener(
 
     private fun enqueue(decision: DownloadDecision.Enqueue, cookie: String?, userAgent: String?) {
         val directory = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val name = DownloadPolicy.uniqueFileName(decision.fileName) { it in reserved || File(directory, it).exists() }
-        reserved += name
+        val manager = context.getSystemService(DownloadManager::class.java)
+        // On disk, or already requested by this app (DownloadManager keeps the title we set: the final name).
+        val requested = requestedNames(manager)
+        val name = DownloadPolicy.uniqueFileName(decision.fileName) { it in requested || File(directory, it).exists() }
         val request = DownloadManager.Request(Uri.parse(decision.url))
             .setMimeType(decision.mimeType)
             .setTitle(name)
@@ -90,11 +90,20 @@ class HerdrDownloadListener(
         cookie?.takeIf { it.isNotBlank() }?.let { request.addRequestHeader("Cookie", it) }
         userAgent?.takeIf { it.isNotBlank() }?.let { request.addRequestHeader("User-Agent", it) }
         try {
-            context.getSystemService(DownloadManager::class.java).enqueue(request)
+            manager.enqueue(request)
         } catch (e: RuntimeException) {
-            reserved -= name
             Log.w(TAG, "download enqueue failed: ${e.javaClass.simpleName}")
         }
+    }
+
+    /** Titles (= destination names) of this app's downloads, including those whose file is still being created. */
+    private fun requestedNames(manager: DownloadManager): Set<String> = try {
+        manager.query(DownloadManager.Query()).use { cursor ->
+            val column = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE)
+            buildSet { while (cursor.moveToNext()) cursor.getString(column)?.let { add(it) } }
+        }
+    } catch (e: RuntimeException) {
+        emptySet()
     }
 
     private companion object {
