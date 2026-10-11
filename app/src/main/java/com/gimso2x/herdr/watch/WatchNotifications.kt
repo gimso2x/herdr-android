@@ -9,10 +9,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import com.gimso2x.herdr.MainActivity
 import com.gimso2x.herdr.R
 import com.gimso2x.herdr.SettingsActivity
+import java.util.concurrent.ConcurrentHashMap
 
 object WatchNotifications {
     const val CHANNEL_WATCH = "herdr_watch"
@@ -69,23 +71,33 @@ object WatchNotifications {
         for (alert in alerts) {
             // tag = paneId: a newer alert for the same pane replaces the older one.
             manager.notify(alert.paneId, NOTIFY_ALERT, alertNotification(context, alert, silent = false))
+            posted[postKey(alert)] = SystemClock.elapsedRealtime()
         }
     }
 
     /**
      * Adds the detail line to an alert that is already on screen. The update is silent (no second
      * sound or heads-up) and skipped when the user dismissed the alert, or a newer alert of another
-     * kind replaced it, in the meantime.
+     * kind replaced it, in the meantime. `notify` is queued by the system, so an alert posted a moment
+     * ago may not be listed yet: it counts as on screen for [POST_SETTLE_MILLIS].
      */
     fun showDetail(context: Context, alert: Alert) {
         if (AppForeground.isForeground() || !hasPostPermission(context)) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         val channel = channelFor(alert.kind)
-        val onScreen = manager.activeNotifications.any {
+        val justPosted = posted[postKey(alert)]?.let { SystemClock.elapsedRealtime() - it < POST_SETTLE_MILLIS } == true
+        val onScreen = justPosted || manager.activeNotifications.any {
             it.id == NOTIFY_ALERT && it.tag == alert.paneId && it.notification.channelId == channel
         }
         if (onScreen) manager.notify(alert.paneId, NOTIFY_ALERT, alertNotification(context, alert, silent = true))
     }
+
+    private const val POST_SETTLE_MILLIS = 3_000L
+
+    /** Elapsed-realtime of the last alert post per kind and pane. */
+    private val posted = ConcurrentHashMap<String, Long>()
+
+    private fun postKey(alert: Alert) = "${alert.kind}|${alert.paneId}"
 
     private fun channelFor(kind: AlertKind): String = when (kind) {
         AlertKind.NEEDS_INPUT -> CHANNEL_NEEDS_INPUT
