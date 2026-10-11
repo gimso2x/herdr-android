@@ -168,7 +168,7 @@ jobs:
         # PulseAudio server its backend fails to initialise and the guest cannot open the microphone.
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq pulseaudio ${{ inputs.gpus && 'strace' || '' }}
+          sudo apt-get install -y -qq pulseaudio ${{ inputs.gpus && 'gdb' || '' }}
       - name: Write QA token file
         env:
           CF_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_CI }}
@@ -182,7 +182,7 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         env:
           QA_PHASES: ${{ inputs.phases }}
-          QA_STRACE: ${{ inputs.gpus && matrix.gpu == 'swiftshader_indirect' && '1' || '' }}
+          QA_GDB: ${{ inputs.gpus && matrix.gpu == 'swiftshader_indirect' && '1' || '' }}
         with:
           api-level: ${{ matrix.api-level }}
           emulator-build: ${{ inputs.emu-build }}

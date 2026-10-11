@@ -146,8 +146,9 @@ emulator_death_facts() {
   grep -iE "out of memory|oom|killed process|qemu|emulator|segfault|general protection|invalid opcode|trap" <<<"$dm" | tail -n 8 | cut -c1-200
   cg="/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup | head -n 1)"
   for f in memory.max memory.peak memory.events; do echo "cgroup $f: $(tr '\n' ' ' <"$cg/$f" 2>/dev/null)"; done
-  echo "strace (signals and exit status of the emulator only, QA_STRACE runs):"
-  grep -E '\+\+\+|--- SIG' "$STRACE_LOG" 2>/dev/null | tail -n 8 | cut -c1-200
+  echo "crashing thread (gdb, QA_GDB runs): signal line, fault address and top frames as 'frame function from module' only:"
+  grep -E 'received signal|^\$[0-9]+ = ' "$GDB_LOG" 2>/dev/null | cut -c1-160 | tail -n 3
+  awk '/^#[0-9]+/ { fn = ($2 ~ /^0x/ && $3 == "in") ? $4 : $2; lib = ""; if (match($0, / from [^ ]+$/)) lib = substr($0, RSTART, RLENGTH); sub(/\(.*/, "", fn); print $1, fn lib }' "$GDB_LOG" 2>/dev/null | head -n 14 | cut -c1-200
   ls -1 /tmp/android-runner 2>/dev/null | head -n 5
   echo "emulator stderr/-verbose log, last 40 lines (host process output, 200 cols; empty without -verbose redirect):"
   tail -n 40 "$EMULATOR_LOG" 2>/dev/null | cut -c1-200
@@ -420,15 +421,22 @@ fi
 EV_LOG="$(mktemp)"
 adb logcat -b events,crash -v time >"$EV_LOG" 2>&1 &
 EV_PID=$!
-STRACE_LOG=/tmp/qemu-strace.log
-if [ -n "${QA_STRACE:-}" ]; then
-  # Debug only: say how the emulator process ends (killed by which signal, or exited with which status).
+GDB_LOG=/tmp/qemu-gdb.log
+if [ -n "${QA_GDB:-}" ]; then
+  # Debug only: attach gdb to the emulator process, let it run, and on the fatal signal print the faulting
+  # thread's top frames (names only; the dump itself is never kept or printed).
   qpid=$(pgrep -fn qemu-system-x86_64 || true)
   if [ -n "$qpid" ]; then
-    sudo -n strace -f -p "$qpid" -e trace=none -e signal=SIGSEGV,SIGABRT,SIGBUS,SIGILL,SIGFPE,SIGTERM,SIGKILL,SIGHUP,SIGINT,SIGQUIT,SIGPIPE,SIGSYS -o "$STRACE_LOG" >/dev/null 2>&1 &
-    echo "strace attached to emulator pid $qpid"
+    sudo -n env DEBUGINFOD_URLS= gdb -p "$qpid" -batch -nx \
+      -ex 'set pagination off' -ex 'set confirm off' \
+      -ex 'handle all nostop noprint pass' \
+      -ex 'handle SIGSEGV SIGABRT SIGBUS SIGILL SIGFPE stop print' \
+      -ex continue -ex 'p $_siginfo._sifields._sigfault.si_addr' -ex 'bt 14' >"$GDB_LOG" 2>&1 &
+    # The emulator is frozen while gdb loads symbols: do not start any phase before it runs again.
+    wait_until 180 grep -q 'Continuing' "$GDB_LOG" || echo "gdb did not reach 'Continuing' in time"
+    echo "gdb attached to emulator pid $qpid"
   else
-    echo "strace: no emulator pid found"
+    echo "gdb: no emulator pid found"
   fi
 fi
 PROBE_LOG="$(mktemp)"
