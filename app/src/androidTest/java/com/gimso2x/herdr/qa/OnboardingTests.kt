@@ -356,16 +356,19 @@ class O1WatchNotificationTest {
                 val label = By.text(Pattern.compile("에이전트 알림 대기 중|연결 끊김.*"))
                 Qa.device.pressHome()
                 Qa.device.openNotification()
-                var entry = Qa.device.wait(Until.findObject(label), 15_000)
-                if (entry == null) {
-                    // The shade can open before it lays out the entry: collapse and reopen once.
-                    Qa.device.executeShellCommand("cmd statusbar collapse")
-                    Qa.device.pressHome()
-                    Qa.device.openNotification()
-                    entry = Qa.device.wait(Until.findObject(label), 30_000)
+                // Earlier phases leave their own notifications (download complete, system notices): on a
+                // small screen the watcher entry can sit below the fold, so scroll the shade (bounded).
+                var entry = Qa.device.wait(Until.findObject(label), 5_000)
+                var scrolls = 0
+                while (entry == null && scrolls < 6) {
+                    val w = Qa.device.displayWidth
+                    val h = Qa.device.displayHeight
+                    Qa.device.swipe(w / 2, h * 8 / 10, w / 2, h * 4 / 10, 30)
+                    scrolls++
+                    entry = Qa.device.wait(Until.findObject(label), 2_000)
                 }
-                assertNotNull("watcher notification not in the shade", entry)
-                entry.click()
+                assertNotNull("watcher notification not in the shade after $scrolls scrolls", entry)
+                entry!!.click()
                 Ob.awaitActivity("SettingsActivity")
                 assertTrue(Qa.device.wait(Until.hasObject(By.text("서비스 토큰")), 30_000) == true)
             }

@@ -33,6 +33,7 @@ MEM_LOG="$(mktemp)"
     sleep 10
   done ) >"$MEM_LOG" 2>&1 &
 SAMPLER=$!
+EV_LOG=/dev/null
 FAILED=()
 RAN=()
 
@@ -44,7 +45,7 @@ purge_live_evidence() {
 }
 
 cleanup() {
-  kill "$SAMPLER" 2>/dev/null || true
+  kill "$SAMPLER" "${EV_PID:-}" 2>/dev/null || true
   adb pull /sdcard/Download/qa/. "$OUT/" >/dev/null 2>&1 || true
   purge_live_evidence
   adb shell rm -f "$DEVICE_TOKEN" >/dev/null 2>&1 || true
@@ -132,6 +133,9 @@ emulator_death_facts() {
   { sudo -n dmesg 2>/dev/null || dmesg 2>/dev/null; } | grep -iE "out of memory|oom-kill|killed process|qemu|segfault|general protection" | tail -n 8 | cut -c1-200
   ls -1 /tmp/android-runner 2>/dev/null | head -n 5
   ls -1 "$HOME/.android" 2>/dev/null | grep -iE "crash|hs_err|emu-" | head -n 5
+  echo "last guest events/crash lines (process-level buffers, 160 cols):"
+  tail -n 30 "$EV_LOG" 2>/dev/null | cut -c1-160
+  ls -1R /tmp/android-runner 2>/dev/null | head -n 12
   echo "--- end emulator death facts"
 }
 
@@ -375,6 +379,10 @@ free -m
 if [ "$TIER" = "full" ]; then
   adb push "$TOKEN_FILE" "$DEVICE_TOKEN" >/dev/null || { echo "could not push the qa token"; exit 1; }
 fi
+# Process-level event/crash buffers only (no page text), streamed to the host so they survive an emulator death.
+EV_LOG="$(mktemp)"
+adb logcat -b events,crash -v time >"$EV_LOG" 2>&1 &
+EV_PID=$!
 adb shell input keyevent KEYCODE_WAKEUP
 adb shell wm dismiss-keyguard
 # The soft keyboard must show even though the emulator reports a hardware keyboard (F4, F5).
