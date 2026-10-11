@@ -64,10 +64,13 @@ bash scripts/release.sh 0.1.0
 
 `android.yml`은 단계를 하나만 고릅니다. 에뮬레이터 phase 목록은 `ci/instrumented.sh --tier fast|full`이 유일한 기준입니다(CI는 full만 사용).
 
-- **fast** (브랜치 push, pull request): 빌드 + 단위 테스트 + lint만. 에뮬레이터도 시크릿도 필요 없어 PR에서도 돕니다.
-- **full** (`v*` 태그, 매주 일요일 18:00 UTC 스케줄, 수동 실행): fast + 에뮬레이터 API 34 전체 phase(라이브 L1-L4 포함) + API 35 부분 집합(AVD 스냅샷 캐시 사용). 릴리스 잡은 빌드와 두 에뮬레이터 잡이 모두 통과해야만 실행됩니다.
+- **fast** (브랜치 push, pull request): 빌드 + 단위 테스트 + lint + 임시 키로 서명한 minify 릴리스 빌드(R8 확인) + CI 스크립트 자체 테스트. 에뮬레이터도 시크릿도 필요 없어 PR에서도 돕니다.
+- **full** (`v*` 태그, 매주 일요일 18:00 UTC 스케줄, 수동 실행): fast + 에뮬레이터 API 34 전체 phase(라이브 L1-L4 포함) + API 35 부분 집합. 모든 phase는 러너가 성공 종료하고 클래스별 예상 테스트 수만큼 실행(0개 불가)해야 통과합니다.
+- **릴리스 잡**은 태그 push 이벤트에서만, 기본 매트릭스(API 34·35, 전체 phase)로 돈 full 실행 뒤에만 실행됩니다. 수동 실행(`apis`/`phases`/`gpus` 덮어쓰기 포함)은 태그 ref에서도 릴리스하지 않습니다.
 
-수동으로 full을 돌리려면 `gh workflow run android.yml -f tier=full --ref main`을 실행합니다.
+수동으로 full을 돌리려면 `gh workflow run android.yml -f tier=full --ref main`을 실행합니다. 수동 입력(`apis`, `gpus`, `emu-build`, `phases`)은 plan 잡에서 검증되며 알 수 없는 phase ID는 거부됩니다.
+
+보안 규칙(공개 저장소): 모든 `uses:`는 커밋 SHA로 고정(Dependabot이 갱신)하고, 디버그 APK는 패키지 `com.gimso2x.herdr.debug`·임시 디버그 키로만 빌드하며 full 단계에서 1일만 보관합니다. 에뮬레이터 산출물은 시크릿 스캔(`ci/secret-scan.sh`: 토큰·서버 주소·`CF_Authorization=`·JWT 형태)이 통과해야만 업로드하고, 라이브 phase(L1-L4, P1)의 스크린샷·logcat은 수집하지 않습니다. Gradle은 `gradle/verification-metadata.xml`(sha256)과 래퍼 체크섬으로 검증하며, 의존성을 바꾸면 `gradle-verification.yml`을 수동 실행해 파일을 다시 만듭니다.
 
 ## 서명 키 백업
 
