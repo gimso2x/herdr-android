@@ -25,7 +25,7 @@ on:
         required: false
         default: ''
       gpus:
-        description: 'Debug only: JSON list of emulator -gpu modes (empty = swiftshader_indirect); a list also turns on -verbose and keeps the emulator output for the death facts'
+        description: 'Debug only: JSON list of emulator -gpu modes (empty = per-API default: swangle_indirect on 34, swiftshader_indirect on 35); a list also turns on -verbose and keeps the emulator output for the death facts'
         required: false
         default: ''
       emu-build:
@@ -136,7 +136,7 @@ jobs:
       fail-fast: false
       matrix:
         api-level: ${{ fromJSON(inputs.apis || '[34, 35]') }}
-        gpu: ${{ fromJSON(inputs.gpus || '["swiftshader_indirect"]') }}
+        gpu: ${{ fromJSON(inputs.gpus || '["auto"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -189,8 +189,12 @@ jobs:
           # AOSP image: no Play services, whose process death on the 2-core runner killed the app.
           target: default
           arch: x86_64
+          # API 34 runs the live phases: swiftshader_indirect makes its emulator host process die with SIGSEGV in the
+          # RenderThread ~5 s after the live page starts rendering (guest mode dies too); swangle_indirect (ANGLE on
+          # SwiftShader Vulkan) ran the live and fixture phases green. See doc/evidence/herdr-android-app/ci-split.txt.
+          # API 35 runs no live phase and stays on swiftshader_indirect.
           # No -noaudio: the microphone scenarios need the emulator's audio.
-          emulator-options: -no-window -gpu ${{ matrix.gpu }} -no-snapshot -no-boot-anim -no-metrics ${{ inputs.gpus && '-verbose >/tmp/emulator.log 2>&1' || '' }}
+          emulator-options: -no-window -gpu ${{ matrix.gpu != 'auto' && matrix.gpu || (matrix.api-level == 34 && 'swangle_indirect' || 'swiftshader_indirect') }} -no-snapshot -no-boot-anim -no-metrics ${{ inputs.gpus && '-verbose >/tmp/emulator.log 2>&1' || '' }}
           disk-size: 4096M
           ram-size: 4096M
           heap-size: 512M
