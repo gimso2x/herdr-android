@@ -3,6 +3,7 @@ package com.gimso2x.herdr.qa
 import android.Manifest
 import android.app.Activity
 import android.app.Instrumentation
+import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.provider.Settings
@@ -23,6 +24,7 @@ import com.gimso2x.herdr.MainActivity
 import com.gimso2x.herdr.OnboardingActivity
 import com.gimso2x.herdr.SetupActivity
 import com.gimso2x.herdr.watch.StatusWatcherService
+import com.gimso2x.herdr.watch.WatchNotifications
 import java.util.regex.Pattern
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -343,12 +345,25 @@ class O1WatchNotificationTest {
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
                 runBlocking { withTimeout(30_000) { StatusWatcherService.isRunning.first { it } } }
+                // The service reports isRunning before its ongoing notification is necessarily posted: wait
+                // for it in the NotificationManager instead of racing the shade UI.
+                val manager = Qa.targetContext.getSystemService(NotificationManager::class.java)
+                Qa.until(30_000, "ongoing watcher notification posted") {
+                    manager.activeNotifications.any {
+                        it.notification.channelId == WatchNotifications.CHANNEL_WATCH && it.id == WatchNotifications.NOTIFY_WATCH
+                    }
+                }
+                val label = By.text(Pattern.compile("에이전트 알림 대기 중|연결 끊김.*"))
                 Qa.device.pressHome()
                 Qa.device.openNotification()
-                val entry = Qa.device.wait(
-                    Until.findObject(By.text(Pattern.compile("에이전트 알림 대기 중|연결 끊김.*"))),
-                    30_000,
-                )
+                var entry = Qa.device.wait(Until.findObject(label), 15_000)
+                if (entry == null) {
+                    // The shade can open before it lays out the entry: collapse and reopen once.
+                    Qa.device.executeShellCommand("cmd statusbar collapse")
+                    Qa.device.pressHome()
+                    Qa.device.openNotification()
+                    entry = Qa.device.wait(Until.findObject(label), 30_000)
+                }
                 assertNotNull("watcher notification not in the shade", entry)
                 entry.click()
                 Ob.awaitActivity("SettingsActivity")

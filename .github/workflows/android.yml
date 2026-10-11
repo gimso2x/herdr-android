@@ -1,5 +1,7 @@
 name: Android
 
+# Tiers: fast (push, pull_request) = plan + build only (assemble, unit tests, lint; no emulator, no secrets).
+# full (tags v*, weekly schedule, workflow_dispatch tier=full) = plus both emulator legs; release needs them.
 on:
   push:
     branches: ['**']
@@ -118,34 +120,31 @@ jobs:
           if-no-files-found: error
 
   instrumented:
+    if: needs.plan.outputs.tier == 'full'
     needs: [build, plan]
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        api-level: ${{ fromJSON(inputs.apis || (needs.plan.outputs.tier == 'full' && '[34, 35]' || '[34]')) }}
+        api-level: ${{ fromJSON(inputs.apis || '[34, 35]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
-          cache: gradle
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
-      - name: Install Android SDK
-        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-      - name: Build the debug and test APKs before the emulator starts
-        # Keeps the CPU/RAM-hungry Gradle build away from the booted emulator (ANR dialogs and
-        # low-memory kills); ci/instrumented.sh then only has to install the up-to-date outputs.
-        run: |
-          ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
-          # The Kotlin compile daemon outlives --no-daemon builds; free its RAM for the emulator.
-          pkill -f KotlinCompileDaemon || true
-          ./gradlew --stop
-          free -m
+      - name: Install build-tools (aapt2 for the manifest host-check)
+        run: sdkmanager 'build-tools;36.0.0'
+      - name: Download the APKs built by the build job
+        # No second Gradle build here: the build job already produced the debug and test APKs.
+        uses: actions/download-artifact@v4
+        with:
+          name: herdr-debug-apk
+          path: app/build/outputs/apk
       - name: Free disk space for the emulator userdata partition
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/local/lib/android/sdk/ndk /opt/hostedtoolcache/CodeQL
@@ -161,8 +160,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq pulseaudio
-      - name: Write QA token file (full tier only)
-        if: needs.plan.outputs.tier == 'full'
+      - name: Write QA token file
         env:
           CF_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_CI }}
           CF_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET_CI }}
@@ -171,6 +169,29 @@ jobs:
           test -n "$CF_ID" && test -n "$CF_SECRET" && test -n "$BASE_URL" || { echo 'CI token/base-url secrets are missing' >&2; exit 1; }
           umask 077
           jq -n '{id: env.CF_ID, secret: env.CF_SECRET, baseUrl: env.BASE_URL, liveQa: true}' > "$RUNNER_TEMP/qa-token.json"
+      - name: AVD cache
+        uses: actions/cache@v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-${{ matrix.api-level }}-default-x86_64-v1
+      - name: Create the AVD and its boot snapshot (cache miss only)
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: default
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -no-metrics
+          disk-size: 4096M
+          ram-size: 4096M
+          heap-size: 512M
+          pre-emulator-launch-script: pulseaudio --start --exit-idle-time=-1
+          disable-animations: false
+          script: echo "Generated the AVD snapshot for caching."
       - name: Instrumented QA on the emulator
         uses: reactivecircus/android-emulator-runner@v2
         env:
@@ -180,14 +201,16 @@ jobs:
           # AOSP image: no Play services, whose process death on the 2-core runner killed the app.
           target: default
           arch: x86_64
-          # No -noaudio: the microphone scenarios need the emulator's audio.
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -no-metrics
+          force-avd-creation: false
+          # No -noaudio: the microphone scenarios need the emulator's audio. Boots from the cached
+          # snapshot when there is one; -no-snapshot-save keeps test state out of it.
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot-save -no-boot-anim -no-metrics
           disk-size: 4096M
           ram-size: 4096M
           heap-size: 512M
           pre-emulator-launch-script: pulseaudio --start --exit-idle-time=-1
           disable-animations: true
-          script: ./ci/instrumented.sh ${{ matrix.api-level }} --tier ${{ needs.plan.outputs.tier }}
+          script: ./ci/instrumented.sh ${{ matrix.api-level }} --tier full
       - name: Remove QA token file
         if: always()
         run: rm -f "$RUNNER_TEMP/qa-token.json"

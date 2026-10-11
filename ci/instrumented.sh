@@ -364,13 +364,13 @@ if [ "$TIER" = "full" ] && [ ! -s "$TOKEN_FILE" ]; then
   exit 1
 fi
 
-if ! ./gradlew --no-daemon :app:installDebug :app:installDebugAndroidTest; then
-  echo "gradle install failed"
-  exit 1
-fi
-
-# The install build leaves a Kotlin daemon behind; the emulator needs that memory.
-pkill -f KotlinCompileDaemon >/dev/null 2>&1 || true
+# The workflow downloads the APKs the build job produced; no second Gradle build on the emulator host.
+for apk in app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk; do
+  if ! adb install -r -t "$apk"; then
+    echo "adb install failed for $apk"
+    exit 1
+  fi
+done
 free -m
 if [ "$TIER" = "full" ]; then
   adb push "$TOKEN_FILE" "$DEVICE_TOKEN" >/dev/null || { echo "could not push the qa token"; exit 1; }

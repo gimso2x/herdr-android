@@ -62,10 +62,10 @@ bash scripts/release.sh 0.1.0
 
 ## CI 두 단계 (개발자용)
 
-`android.yml`은 단계를 하나만 고릅니다. 단계별 phase 목록은 `ci/instrumented.sh --tier fast|full`이 유일한 기준입니다.
+`android.yml`은 단계를 하나만 고릅니다. 에뮬레이터 phase 목록은 `ci/instrumented.sh --tier fast|full`이 유일한 기준입니다(CI는 full만 사용).
 
-- **fast** (브랜치 push, pull request): 빌드 + 단위 테스트 + lint, 그리고 API 34 에뮬레이터에서 fixture 단계만(라이브 L1-L4 제외). 시크릿이 필요 없어 PR에서도 돕니다.
-- **full** (`v*` 태그, 매주 일요일 18:00 UTC 스케줄, 수동 실행): API 34 전체 단계(라이브 L1-L4 포함) + API 35 부분 집합. 릴리스 잡은 빌드와 두 에뮬레이터 잡이 모두 통과해야만 실행됩니다.
+- **fast** (브랜치 push, pull request): 빌드 + 단위 테스트 + lint만. 에뮬레이터도 시크릿도 필요 없어 PR에서도 돕니다.
+- **full** (`v*` 태그, 매주 일요일 18:00 UTC 스케줄, 수동 실행): fast + 에뮬레이터 API 34 전체 phase(라이브 L1-L4 포함) + API 35 부분 집합(AVD 스냅샷 캐시 사용). 릴리스 잡은 빌드와 두 에뮬레이터 잡이 모두 통과해야만 실행됩니다.
 
 수동으로 full을 돌리려면 `gh workflow run android.yml -f tier=full --ref main`을 실행합니다.
 
