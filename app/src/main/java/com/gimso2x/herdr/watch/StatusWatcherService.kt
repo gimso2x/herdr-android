@@ -15,7 +15,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -52,6 +51,7 @@ class StatusWatcherService : Service() {
             cookie = { CookieManager.getInstance().getCookie(baseUrl) },
             tracker = StatusTracker { WatchTestHooks.clock.nowMillis() },
             onAlerts = { if (scope.isActive) WatchNotifications.show(context, it) },
+            onAlertDetail = { if (scope.isActive) WatchNotifications.showDetail(context, it) },
         )
     }
 
@@ -81,19 +81,21 @@ class StatusWatcherService : Service() {
 
     private suspend fun runLoop() {
         val poller = WatchRuntime.poller ?: return
-        while (scope.isActive) {
+        // Start-to-start: a slow poll shortens the pause instead of adding to it. Alert details are
+        // fetched off this path (WatchPoller), so they never delay the next status sample.
+        PollLoop().run {
             val ok = poller.pollOnce().outcome == PollOutcome.OK
             if (connected != ok) {
                 connected = ok
                 getSystemService(android.app.NotificationManager::class.java)
                     ?.notify(WatchNotifications.NOTIFY_WATCH, WatchNotifications.watchNotification(this, ok))
             }
-            delay(POLL_INTERVAL_MILLIS)
         }
     }
 
     override fun onDestroy() {
         scope.cancel()
+        WatchRuntime.poller?.close()
         WatchRuntime.poller = null
         isRunningFlow.value = false
         super.onDestroy()

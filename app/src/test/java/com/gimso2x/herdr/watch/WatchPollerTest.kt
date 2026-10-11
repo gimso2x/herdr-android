@@ -12,10 +12,13 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Call
 import okhttp3.EventListener
@@ -67,7 +70,14 @@ class WatchPollerTest {
         it.update(listOf(PaneSample("w1:p1", AgentStatus.WORKING, "work")))
     }
 
-    private fun poller(httpClient: OkHttpClient = client): WatchPoller {
+    private val details = CopyOnWriteArrayList<Alert>()
+
+    private fun poller(
+        httpClient: OkHttpClient = client,
+        tracker: StatusTracker = this.tracker,
+        maxConcurrentDetails: Int = 4,
+        detailFetcher: (suspend (AlertKind, String, String) -> String?)? = null,
+    ): WatchPoller {
         val exp = 4_102_444_800L // far future: the session never refreshes
         val session = AccessSession(
             fetcher = { BootstrapResult.Success(TestJwt.setCookie(TestJwt.unsigned(exp)), exp) },
@@ -81,13 +91,18 @@ class WatchPollerTest {
                 },
             ),
         )
+        val base = "http://127.0.0.1:1"
         return WatchPoller(
             session = session,
             client = httpClient,
-            baseUrl = "http://127.0.0.1:1",
+            baseUrl = base,
             cookie = { "CF_Authorization=x" },
             tracker = tracker,
             onAlerts = { alerts += it },
+            onAlertDetail = { details += it },
+            maxConcurrentDetails = maxConcurrentDetails,
+            detailFetcher = detailFetcher
+                ?: { kind, paneId, cookie -> AlertDetail.fetch(httpClient, base, cookie, kind, paneId) },
         )
     }
 
@@ -204,12 +219,15 @@ class WatchPollerTest {
         release.countDown()
         val requests = CopyOnWriteArrayList<String>()
         val routed = routedClient(requests, true)
-        poller(routed).pollOnce()
+        val p = poller(routed)
+        p.pollOnce()
+        p.awaitDetails()
         assertEquals(
             listOf("GET /api/session", "GET /api/pane/prompt?pane_id=w1%3Ap1"),
             requests.toList(),
         )
-        val alert = alerts.single()
+        assertEquals("the base alert went out without the detail", null, alerts.single().detail)
+        val alert = details.single()
         assertEquals("Apply the fixture migration?", alert.detail)
         assertEquals("pi — 입력이 필요합니다\nApply the fixture migration?", alert.bigText)
         routed.dispatcher.executorService.shutdown()
@@ -220,12 +238,91 @@ class WatchPollerTest {
         release.countDown()
         val requests = CopyOnWriteArrayList<String>()
         val routed = routedClient(requests, false)
-        poller(routed).pollOnce()
+        val p = poller(routed)
+        p.pollOnce()
+        p.awaitDetails()
         assertEquals(2, requests.size)
         val alert = alerts.single()
         assertEquals(null, alert.detail)
         assertEquals("pi — 입력이 필요합니다", alert.bigText)
+        assertEquals("a failed detail fetch reports nothing", emptyList<Alert>(), details.toList())
         routed.dispatcher.executorService.shutdown()
+    }
+
+    @Test
+    fun slowDetailFetchNeitherDelaysTheBaseAlertNorTheNextStatusSample() = runBlocking {
+        release.countDown()
+        val detailEntered = CompletableDeferred<Unit>()
+        val detailGate = CompletableDeferred<String?>()
+        val p = poller { _, _, _ ->
+            detailEntered.complete(Unit)
+            detailGate.await() // a prompt endpoint that has not answered yet
+        }
+        try {
+            val first = withTimeout(10_000) { p.pollOnce() }
+            assertEquals(1, first.alertCount)
+            assertEquals("base alert is out before any detail", listOf(AlertKind.NEEDS_INPUT), alerts.map { it.kind })
+            assertEquals(null, alerts.single().detail)
+            withTimeout(10_000) { detailEntered.await() } // the fetch is running, concurrently
+
+            // The next status sample completes while the first alert's detail is still pending.
+            val second = withTimeout(10_000) { p.pollOnce() }
+            assertEquals(first.sequence + 1, second.sequence)
+            assertEquals(emptyList<Alert>(), details.toList())
+
+            detailGate.complete("the question")
+            withTimeout(10_000) { p.awaitDetails() }
+            assertEquals(listOf("the question"), details.map { it.detail })
+            assertEquals(1, alerts.size)
+        } finally {
+            p.close()
+        }
+    }
+
+    @Test
+    fun detailFetchesRunConcurrentlyButAreBounded() = runBlocking {
+        val paneIds = (1..5).map { "w1:p$it" }
+        val panes = paneIds.joinToString(",") { """{"pane_id":"$it","agent_status":"blocked","agent":"pi"}""" }
+        val blockedBody = """{"snapshot":{"workspaces":[],"panes":[$panes]}}"""
+        val manyClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(blockedBody.toResponseBody("application/json".toMediaType()))
+                    .build()
+            }
+            .build()
+        val seeded = StatusTracker().also { t ->
+            t.update(paneIds.map { PaneSample(it, AgentStatus.WORKING, "work") })
+        }
+        val active = AtomicInteger()
+        val peak = AtomicInteger()
+        val twoRunning = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        val p = poller(manyClient, seeded, maxConcurrentDetails = 2) { _, paneId, _ ->
+            val now = active.incrementAndGet()
+            peak.accumulateAndGet(now) { a, b -> maxOf(a, b) }
+            if (now == 2) twoRunning.complete(Unit)
+            gate.await()
+            active.decrementAndGet()
+            "detail of $paneId"
+        }
+        try {
+            val result = withTimeout(10_000) { p.pollOnce() }
+            assertEquals(5, result.alertCount)
+            assertEquals("all five base alerts dispatched at once", 5, alerts.size)
+            withTimeout(10_000) { twoRunning.await() } // two details in flight together
+            gate.complete(Unit)
+            withTimeout(10_000) { p.awaitDetails() }
+            assertEquals(5, details.size)
+            assertEquals("never more than the bound in flight", 2, peak.get())
+        } finally {
+            manyClient.dispatcher.executorService.shutdown()
+            p.close()
+        }
     }
 
     private suspend fun awaitLatch(latch: CountDownLatch): Boolean =

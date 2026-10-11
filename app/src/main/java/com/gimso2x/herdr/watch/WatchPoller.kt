@@ -7,23 +7,40 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 
-/** One `GET /api/session` per [pollOnce]; polls are serialized so the loop and test hooks never interleave. */
+/**
+ * One `GET /api/session` per [pollOnce]; polls are serialized so the loop and test hooks never interleave.
+ *
+ * Alerts are dispatched through [onAlerts] as soon as the status sample is classified. The optional
+ * detail line of each alert is fetched afterwards, off the polling path: at most [maxConcurrentDetails]
+ * run at once, each capped at [AlertDetail.TIMEOUT_MS], and a finished one is reported through
+ * [onAlertDetail] (never for a failed fetch). [pollOnce] therefore never waits for detail work;
+ * [awaitDetails] does, for tests and diagnostics.
+ */
 class WatchPoller(
     private val session: AccessSession,
     private val client: OkHttpClient,
@@ -31,15 +48,50 @@ class WatchPoller(
     private val cookie: () -> String?,
     private val tracker: StatusTracker,
     private val onAlerts: (List<Alert>) -> Unit,
+    private val onAlertDetail: (Alert) -> Unit = {},
+    maxConcurrentDetails: Int = MAX_CONCURRENT_DETAILS,
+    private val detailFetcher: suspend (kind: AlertKind, paneId: String, cookie: String) -> String? =
+        { kind, paneId, cookieHeader -> AlertDetail.fetch(client, baseUrl, cookieHeader, kind, paneId) },
 ) {
     private val mutex = Mutex()
     private val sequence = AtomicLong()
     private var forceRefresh = false
+    private val detailScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val detailPermits = Semaphore(maxConcurrentDetails)
 
     suspend fun pollOnce(): PollResult = mutex.withLock {
         val result = withContext(Dispatchers.IO) { poll() }
         WatchRuntime.publish(result)
         result
+    }
+
+    /** Suspends until every detail fetch started so far has finished (and been reported). */
+    suspend fun awaitDetails() {
+        detailScope.coroutineContext[Job]?.children?.toList()?.joinAll()
+    }
+
+    /** Cancels in-flight detail work; call when the owning service stops. */
+    fun close() {
+        detailScope.cancel()
+    }
+
+    private fun fetchDetails(alerts: List<Alert>, cookieHeader: String) {
+        for (alert in alerts) {
+            detailScope.launch {
+                val detail = detailPermits.withPermit {
+                    withTimeoutOrNull(AlertDetail.TIMEOUT_MS + DETAIL_GRACE_MILLIS) {
+                        detailFetcher(alert.kind, alert.paneId, cookieHeader)
+                    }
+                } ?: return@launch
+                try {
+                    onAlertDetail(alert.copy(detail = detail))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // The detail line is optional enrichment: the base alert is already out.
+                }
+            }
+        }
     }
 
     private suspend fun poll(): PollResult {
@@ -110,12 +162,12 @@ class WatchPoller(
             if (samples == null) {
                 PollResult(seq, PollOutcome.PARSE_ERROR)
             } else {
-                // One optional read-only GET per alert (5 s cap, failure -> no extra line).
-                val alerts = tracker.update(samples).map {
-                    it.copy(detail = AlertDetail.fetch(client, baseUrl, cookieHeader, it.kind, it.paneId))
-                }
+                val alerts = tracker.update(samples)
                 context.ensureActive() // never alert once the poll's owner has been stopped
-                if (alerts.isNotEmpty()) onAlerts(alerts)
+                if (alerts.isNotEmpty()) {
+                    onAlerts(alerts) // base alerts go out now; detail lines follow without blocking the next sample
+                    fetchDetails(alerts, cookieHeader)
+                }
                 PollResult(seq, PollOutcome.OK, samples.size, alerts.size)
             }
         }
@@ -124,5 +176,10 @@ class WatchPoller(
             PollResult(seq, PollOutcome.AUTH)
         }
         else -> PollResult(seq, PollOutcome.HTTP_ERROR)
+    }
+
+    private companion object {
+        const val MAX_CONCURRENT_DETAILS = 4
+        const val DETAIL_GRACE_MILLIS = 1_000L
     }
 }
