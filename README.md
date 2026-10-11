@@ -81,6 +81,8 @@ bash scripts/release.sh 0.1.0
 
 보안 규칙(공개 저장소): 모든 `uses:`는 커밋 SHA로 고정(Dependabot이 갱신)하고, 디버그 APK는 패키지 `com.gimso2x.herdr.debug`·임시 디버그 키로만 빌드하며 full 단계에서 1일만 보관합니다. 에뮬레이터 산출물은 시크릿 스캔(`ci/secret-scan.sh`: 토큰·서버 주소·`CF_Authorization=`·JWT 형태)이 통과해야만 업로드하고, 라이브 phase(L1-L4, P1)의 스크린샷·logcat은 수집하지 않습니다. Gradle은 `gradle/verification-metadata.xml`(sha256)과 래퍼 체크섬으로 검증하며, 의존성을 바꾸면 `gradle-verification.yml`을 수동 실행해 파일을 다시 만듭니다.
 
+휴대폰에서 FCM을 확인할 때는 수동 실행에 `-f phone-apk=true`를 추가하고 `herdr-phone-test-apk`를 받습니다. 이 APK는 에뮬레이터의 알림 게시 확인용 `NotificationListenerService`를 제외하고, 서명·패키지 이름·알림 접근 서비스 부재·시크릿 스캔을 확인한 뒤 7일간 보관합니다. `herdr-debug-apk`는 알림 접근 서비스가 들어 있는 에뮬레이터 QA 전용이므로 휴대폰 설치용으로 사용하지 않습니다. 휴대폰용도 별도 `.debug` 패키지이며, 정식 앱이나 Obtainium 업데이트를 대체하지 않습니다.
+
 ## 서명 키 백업
 
 릴리스 서명 키는 서버의 `~/.config/herdr-android/signing/`(`herdr-release.jks`, `signing.properties`, 권한 700/600)에 있습니다. **이 폴더를 별도로 백업하세요.** 잃어버리면 같은 서명으로 업데이트할 수 없어 앱을 지우고 다시 설치해야 하고, 그때 저장된 토큰도 사라집니다.

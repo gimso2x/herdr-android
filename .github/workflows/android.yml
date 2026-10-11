@@ -36,6 +36,10 @@ on:
         description: 'Debug only: emulator build number to pin (digits; empty = the runner image build)'
         required: false
         default: ''
+      phone-apk:
+        description: 'Also build a separate phone-test APK without emulator notification-access components'
+        type: boolean
+        default: false
 
 concurrency:
   # Fast and full runs of one ref never cancel each other (a push must not kill a manual full run).
@@ -179,6 +183,36 @@ jobs:
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
           retention-days: 1
+          if-no-files-found: error
+      - name: Build phone-test APK without notification access
+        if: github.event_name == 'workflow_dispatch' && inputs.phone-apk
+        env:
+          CF_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_CI }}
+          CF_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET_CI }}
+          BASE_URL: ${{ secrets.HERDR_BASE_URL }}
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon -PphoneTest=true assembleDebug
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$apk"
+          manifest=$("$ANDROID_HOME/build-tools/36.0.0/aapt2" dump xmltree "$apk" --file AndroidManifest.xml)
+          if grep -Eq 'BIND_NOTIFICATION_LISTENER_SERVICE|PushNotificationObserver' <<<"$manifest"; then
+            echo 'phone APK contains the emulator notification-access service' >&2
+            exit 1
+          fi
+          badging=$("$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$apk")
+          grep -q "^package: name='com.gimso2x.herdr.debug'" <<<"$badging"
+          ci/secret-scan.sh --apk "$apk"
+          sha256sum "$apk"
+          echo 'PHONE APK PASS: separate debug package, signature verified, no notification-access service, secret scan clean'
+      - name: Upload phone-test APK
+        if: success() && github.event_name == 'workflow_dispatch' && inputs.phone-apk
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: herdr-phone-test-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
           if-no-files-found: error
 
   instrumented:
