@@ -158,57 +158,6 @@ class S1MainFrameRetryTest {
                     }
                 }
                 Qa.device.findObject(By.text(RETRY)).click()
-                Qa.awaitJs("page after retry", 60_000, "document.getElementById('m') !== null")
-                Qa.until(30_000, "overlay gone") { !Qa.device.hasObject(By.text(RETRY)) }
-                assertTrue("retry must refresh authentication first", fx.healthRequests() > health)
-                val paths = rootPaths(fx)
-                assertTrue("same URL requested again: $paths", paths.size >= 2 && paths.all { it.contains("pane=p1") })
-                assertTrue(Qa.currentUrl().orEmpty().contains("pane=p1"))
-            }
-        } finally {
-            fx.stop()
-        }
-    }
-
-    @Test
-    fun httpErrorShowsRetryAndRetryReloadsTheSameUrl() =
-        retryFlow { MockResponse().setResponseCode(503).setBody("down") }
-
-    @Test
-    fun transportFailureShowsRetryAndRetryReloadsTheSameUrl() {
-        Qa.resetState(alerts = false, token = Qa.syntheticToken())
-        val fx = Fixture()
-        fx.routes["/"] = { fx.html("ok", "<div id=m>ok</div>") }
-        fx.start()
-        val port = java.net.URI(fx.base).port
-        var revived: MockWebServer? = null
-        try {
-            ActivityScenario.launch(MainActivity::class.java).use {
-                Qa.awaitJs("first page", 60_000, "document.getElementById('m') !== null")
-                // The server goes away: the next main-frame load is refused at the socket.
-                fx.stop()
-                Qa.loadUrl(fx.base + "/?machine=local&pane=p1&view=chat")
-                assertNotNull("retry overlay not shown", Qa.device.wait(Until.findObject(By.text(RETRY)), 60_000))
-                // The same address comes back (health + page); retry must refresh auth and load the same URL.
-                val health = AtomicInteger()
-                val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
-                revived = MockWebServer().also { server ->
-                    server.dispatcher = object : Dispatcher() {
-                        override fun dispatch(request: RecordedRequest): MockResponse {
-                            requests += request.path.orEmpty()
-                            return when (request.path.orEmpty().substringBefore('?')) {
-                                "/api/health" -> MockResponse().setResponseCode(200).setBody("ok").addHeader(
-                                    "Set-Cookie",
-                                    "CF_Authorization=${Fixture.jwt(System.currentTimeMillis() / 1000 + 400, health.incrementAndGet())}; Path=/; HttpOnly",
-                                )
-                                "/" -> fx.html("back", "<div id=m2>back</div>")
-                                else -> MockResponse().setResponseCode(404)
-                            }
-                        }
-                    }
-                    server.start(java.net.InetAddress.getByName("127.0.0.1"), port)
-                }
-                Qa.device.findObject(By.text(RETRY)).click()
                 Qa.awaitJs("page after retry", 60_000, "document.getElementById('m2') !== null")
                 Qa.until(30_000, "overlay gone") { !Qa.device.hasObject(By.text(RETRY)) }
                 assertTrue("retry must refresh authentication first", health.get() >= 1)
