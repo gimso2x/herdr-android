@@ -57,9 +57,10 @@ class FcmLiveDeliveryTest {
             InstrumentationRegistry.getInstrumentation().sendStatus(0, android.os.Bundle().apply {
                 putString("herdr_fcm_stage", value)
                 if (error != null) {
-                    putString("herdr_fcm_error_class", error.javaClass.name)
-                    if (error.message in setOf("SERVICE_NOT_AVAILABLE", "FIS_AUTH_ERROR", "AUTHENTICATION_FAILED")) {
-                        putString("herdr_fcm_error_code", error.message)
+                    val causes = generateSequence(error) { it.cause }.take(8).toList()
+                    putString("herdr_fcm_error_class", causes.joinToString(",") { it.javaClass.name })
+                    causes.firstOrNull { it.message in setOf("SERVICE_NOT_AVAILABLE", "FIS_AUTH_ERROR", "AUTHENTICATION_FAILED", "INVALID_SENDER") }?.let {
+                        putString("herdr_fcm_error_code", it.message)
                     }
                 }
             })

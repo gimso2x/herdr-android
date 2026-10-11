@@ -132,7 +132,12 @@ object PushQa {
         val loaded = async(start = CoroutineStart.UNDISPATCHED) { WatchTestHooks.finishedPages.first {
             it.contains("pane=$encodedPane&view=chat")
         } }
-        notification.notification.contentIntent.send()
+        val current = notifications.activeNotifications.single { it.key == notification.key }
+        val title = text(current, Notification.EXTRA_TITLE)
+        assertTrue("notification shade did not open", Qa.device.openNotification())
+        val row = Qa.device.wait(Until.findObject(By.pkg("com.android.systemui").text(title)), 10_000)
+        assertNotNull("posted notification was not visible in SystemUI", row)
+        row!!.click()
         withTimeout(30_000) { loaded.await() }
     }
 }
