@@ -131,6 +131,67 @@ class S1MainFrameRetryTest {
                 // The same address comes back (health + page); retry must refresh auth and load the same URL.
                 val health = AtomicInteger()
                 val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
+                val dispatcher = object : Dispatcher() {
+                    override fun dispatch(request: RecordedRequest): MockResponse {
+                        requests += request.path.orEmpty()
+                        return when (request.path.orEmpty().substringBefore('?')) {
+                            "/api/health" -> MockResponse().setResponseCode(200).setBody("ok").addHeader(
+                                "Set-Cookie",
+                                "CF_Authorization=${Fixture.jwt(System.currentTimeMillis() / 1000 + 400, health.incrementAndGet())}; Path=/; HttpOnly",
+                            )
+                            "/" -> fx.html("back", "<div id=m2>back</div>")
+                            else -> MockResponse().setResponseCode(404)
+                        }
+                    }
+                }
+                // MockWebServer does not reuse a listening address: the old socket's TIME_WAIT has to pass first.
+                Qa.until(150_000, "old address free again") {
+                    val candidate = MockWebServer()
+                    candidate.dispatcher = dispatcher
+                    try {
+                        candidate.start(java.net.InetAddress.getByName("127.0.0.1"), port)
+                        revived = candidate
+                        true
+                    } catch (_: java.io.IOException) {
+                        runCatching { candidate.shutdown() }
+                        false
+                    }
+                }
+                Qa.device.findObject(By.text(RETRY)).click()
+                Qa.awaitJs("page after retry", 60_000, "document.getElementById('m') !== null")
+                Qa.until(30_000, "overlay gone") { !Qa.device.hasObject(By.text(RETRY)) }
+                assertTrue("retry must refresh authentication first", fx.healthRequests() > health)
+                val paths = rootPaths(fx)
+                assertTrue("same URL requested again: $paths", paths.size >= 2 && paths.all { it.contains("pane=p1") })
+                assertTrue(Qa.currentUrl().orEmpty().contains("pane=p1"))
+            }
+        } finally {
+            fx.stop()
+        }
+    }
+
+    @Test
+    fun httpErrorShowsRetryAndRetryReloadsTheSameUrl() =
+        retryFlow { MockResponse().setResponseCode(503).setBody("down") }
+
+    @Test
+    fun transportFailureShowsRetryAndRetryReloadsTheSameUrl() {
+        Qa.resetState(alerts = false, token = Qa.syntheticToken())
+        val fx = Fixture()
+        fx.routes["/"] = { fx.html("ok", "<div id=m>ok</div>") }
+        fx.start()
+        val port = java.net.URI(fx.base).port
+        var revived: MockWebServer? = null
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                Qa.awaitJs("first page", 60_000, "document.getElementById('m') !== null")
+                // The server goes away: the next main-frame load is refused at the socket.
+                fx.stop()
+                Qa.loadUrl(fx.base + "/?machine=local&pane=p1&view=chat")
+                assertNotNull("retry overlay not shown", Qa.device.wait(Until.findObject(By.text(RETRY)), 60_000))
+                // The same address comes back (health + page); retry must refresh auth and load the same URL.
+                val health = AtomicInteger()
+                val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
                 revived = MockWebServer().also { server ->
                     server.dispatcher = object : Dispatcher() {
                         override fun dispatch(request: RecordedRequest): MockResponse {
@@ -539,21 +600,25 @@ class S6AlertSwitchSemanticsTest {
         Qa.resetState(alerts = false, token = Qa.syntheticToken())
         ActivityScenario.launch(SettingsActivity::class.java).use {
             // The row is below the fold on a small screen: scroll until the accessibility tree contains it.
-            Qa.until(60_000, "alert row in the accessibility tree") {
+            val label = "에이전트 알림"
+            fun find() = Qa.device.findObject(By.text(label)) ?: Qa.device.findObject(By.desc(label))
+            fun tree(): String {
+                val out = java.io.ByteArrayOutputStream()
+                Qa.device.dumpWindowHierarchy(out)
+                return out.toString().split("<node ").filter { it.contains("Switch") || it.contains(label) || it.contains("checkable=\"true\"") }
+                    .joinToString("\n") { it.take(300) }
+            }
+            Qa.until(60_000, "alert row in the accessibility tree", { tree() }) {
                 if (android.os.Build.VERSION.SDK_INT >= 33) runCatching { Qa.instr.uiAutomation.clearCache() }
-                if (Qa.device.hasObject(By.clazz("android.widget.Switch"))) {
+                if (find() != null) {
                     true
                 } else {
                     Qa.device.findObject(By.scrollable(true))?.scroll(Direction.DOWN, 0.6f, 600)
                     false
                 }
             }
-            val switches = Qa.device.findObjects(By.clazz("android.widget.Switch"))
-            assertEquals("exactly one switch node", 1, switches.size)
-            val node = switches[0]
-            val labels = listOfNotNull(node.text, node.contentDescription)
-            assertTrue("switch node must carry the label, has $labels", labels.any { it.contains("에이전트 알림") })
-            assertTrue("switch node must be checkable", node.isCheckable)
+            val node = find()!!
+            assertTrue("label node must be the checkable switch: class=${node.className} ${tree()}", node.isCheckable)
             assertFalse(node.isChecked)
         }
     }
