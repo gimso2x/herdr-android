@@ -214,4 +214,36 @@ class UrlPolicyTest {
         assertEquals(UrlDecision.InApp, main(url))
         assertFalse(url.substringAfter("pane=").substringBefore("&view").contains("/"))
     }
+
+    @Test
+    fun charactersChromiumLeavesUnescapedStayInApp() {
+        val urls = listOf(
+            "https://herdr.example.com/?q=a[1]|b^c",
+            "https://herdr.example.com/p[1]/x|y^z?k={v}&t=`b`",
+            "https://herdr.example.com:443/?q=a[1]|b^c#f[1]",
+        )
+        for (url in urls) {
+            assertEquals(url, UrlDecision.InApp, main(url))
+            assertEquals(url, UrlDecision.InApp, sub(url))
+            assertTrue(url, policy.isInApp(url))
+        }
+        assertEquals(UrlDecision.InApp, main("blob:https://herdr.example.com/1f2e?q=a[1]|b^c"))
+    }
+
+    @Test
+    fun unescapedCharactersDoNotWeakenOriginAndUserinfoChecks() {
+        assertEquals(
+            UrlDecision.External("https://example.com/?q=a[1]|b^c"),
+            main("https://example.com/?q=a[1]|b^c"),
+        )
+        assertEquals(UrlDecision.Block, sub("https://example.com/?q=a[1]|b^c"))
+        assertEquals(
+            UrlDecision.External("https://herdr.example.com@evil.com/?q=a[1]|b^c"),
+            main("https://herdr.example.com@evil.com/?q=a[1]|b^c"),
+        )
+        assertEquals(UrlDecision.Block, sub("https://evil.com@herdr.example.com/?q=a[1]|b^c"))
+        assertEquals(UrlDecision.RefreshSession, main("https://team.cloudflareaccess.com/login?x=a[1]|b^c"))
+        assertEquals(UrlDecision.Block, main("https://herdr.example.com/ ?q=a[1]|b^c"))
+        assertTrue(main("https://herdr.example.com:8443/?q=a[1]|b^c") is UrlDecision.External)
+    }
 }
