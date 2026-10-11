@@ -566,8 +566,16 @@ class S6AlertSwitchSemanticsTest {
                     false
                 }
             }
-            val node = find()!!
-            assertTrue("label node must be the checkable switch: class=${node.className} ${tree()}", node.isCheckable)
+            // Merged row: ONE checkable, clickable unit; its label is the text inside its bounds (what TalkBack speaks).
+            val labelNode = find()!!
+            val checkables = Qa.device.findObjects(By.checkable(true))
+            assertEquals("exactly one toggle expected: ${tree()}", 1, checkables.size)
+            val node = checkables[0]
+            assertTrue("the toggle must be clickable as a whole: ${tree()}", node.isClickable)
+            assertTrue(
+                "the label must belong to the toggle: row=${node.visibleBounds} label=${labelNode.visibleBounds}",
+                node.visibleBounds.contains(labelNode.visibleBounds) || node.findObject(By.text(label)) != null,
+            )
             assertFalse(node.isChecked)
         }
     }
