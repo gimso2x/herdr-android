@@ -35,6 +35,11 @@ adb shell am instrument -w -r \
 rc=$?
 set -e
 # Raw instrumentation output can contain private origin/credentials on failure; never print or upload it.
+while IFS= read -r line; do
+  case "$line" in
+    'INSTRUMENTATION_STATUS: herdr_fcm_'*) printf '%s\n' "$line" ;;
+  esac
+done < "$result"
 if ! qa_check_phase FcmLiveDeliveryTest "$result" "$rc" "$expected"; then
   echo 'FCM LIVE FAIL: delivery or notification-tap assertion did not pass' >&2
   exit 1

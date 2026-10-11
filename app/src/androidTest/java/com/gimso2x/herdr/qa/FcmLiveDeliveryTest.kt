@@ -53,11 +53,25 @@ class FcmLiveDeliveryTest {
         val api = PushApi()
         var cookie: String? = null
         var fixture: Fixture? = null
+        fun stage(value: String, error: Throwable? = null) {
+            InstrumentationRegistry.getInstrumentation().sendStatus(0, android.os.Bundle().apply {
+                putString("herdr_fcm_stage", value)
+                if (error != null) {
+                    putString("herdr_fcm_error_class", error.javaClass.name)
+                    if (error.message in setOf("SERVICE_NOT_AVAILABLE", "FIS_AUTH_ERROR", "AUTHENTICATION_FAILED")) {
+                        putString("herdr_fcm_error_code", error.message)
+                    }
+                }
+            })
+        }
         try {
+            stage("listener_connecting")
             PushQa.connectListener()
+            stage("listener_connected")
             synchronized(PushStore.lock) { Qa.app.pushStore.enabled = true }
             ActivityScenario.launch(SettingsActivity::class.java).use {
                 PushQa.background()
+                stage("background")
                 // Subscribe to the actual service callback AND Android's post event before the server
                 // learns this installation. Registration is the parent's fs.watch send handshake.
                 val receipt = async(start = CoroutineStart.UNDISPATCHED) {
@@ -75,12 +89,16 @@ class FcmLiveDeliveryTest {
                             .addOnCanceledListener { continuation.cancel() }
                     }
                 }
+                stage("firebase_token_received")
                 val fresh = withTimeout(30_000) { Qa.app.accessSession.ensureFresh() }
                 assertTrue("live Access bootstrap failed", fresh is BootstrapResult.Success)
                 cookie = (fresh as BootstrapResult.Success).setCookieHeader.substringBefore(';')
+                stage("access_authenticated")
                 Log.i("HerdrFcmQa", "HERDR_FCM_READY installation_id=$installation event_id=$eventId")
                 assertEquals("live bridge registration", 204, api.register(origin, cookie!!, installation, firebaseToken))
+                stage("device_registered")
                 val delivered = withTimeout(180_000) { receipt.await() to posted.await() }
+                stage("notification_received")
                 assertTrue("Firebase callback did not post an alert", delivered.first.posted)
                 assertEquals("qa:fcm-live", delivered.second.tag)
                 assertEquals(WatchNotifications.CHANNEL_NEEDS_INPUT, delivered.second.notification.channelId)
@@ -100,7 +118,11 @@ class FcmLiveDeliveryTest {
                 WatchTestHooks.firebaseToken = "qa-fixture-fcm-token"
                 PushQa.tap(delivered.second, "qa%3Afcm-live")
                 assertTrue(Qa.mainActivityExists())
+                stage("exact_pane_opened")
             }
+        } catch (error: Throwable) {
+            stage("failed", error)
+            throw error
         } finally {
             try {
                 // Always issue DELETE even if POST's response was lost after it reached the bridge.
