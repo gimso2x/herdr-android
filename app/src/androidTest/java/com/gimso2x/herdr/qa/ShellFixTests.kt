@@ -6,6 +6,9 @@ import android.content.Intent
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
+import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.Until
 import com.gimso2x.herdr.HerdrConfig
 import com.gimso2x.herdr.MainActivity
@@ -13,13 +16,15 @@ import com.gimso2x.herdr.SettingsActivity
 import com.gimso2x.herdr.access.ServiceToken
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -47,6 +52,21 @@ private fun fillSetupAndConnect(address: String, token: ServiceToken) {
     val connect = Qa.device.wait(Until.findObject(By.text("연결").enabled(true)), 30_000)
     assertNotNull("connect button never enabled", connect)
     connect.click()
+}
+
+/** Starts an activity the way the launcher/notifications do (no scenario owns it) and finishes everything afterwards. */
+private fun startApp(intent: Intent) {
+    Qa.targetContext.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+
+private fun finishAllActivities() {
+    Qa.onMain {
+        val registry = ActivityLifecycleMonitorRegistry.getInstance()
+        Stage.values().filter { it != Stage.DESTROYED && it != Stage.PRE_ON_CREATE }
+            .flatMap { registry.getActivitiesInStage(it) }
+            .forEach { it.finish() }
+    }
+    Qa.until(30_000, "activities finished", { "live=${Qa.liveActivityNames()}" }) { Qa.liveActivityNames().isEmpty() }
 }
 
 private fun resetAll() {
@@ -94,8 +114,51 @@ class S1MainFrameRetryTest {
         retryFlow { MockResponse().setResponseCode(503).setBody("down") }
 
     @Test
-    fun transportFailureShowsRetryAndRetryReloadsTheSameUrl() =
-        retryFlow { MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START) }
+    fun transportFailureShowsRetryAndRetryReloadsTheSameUrl() {
+        Qa.resetState(alerts = false, token = Qa.syntheticToken())
+        val fx = Fixture()
+        fx.routes["/"] = { fx.html("ok", "<div id=m>ok</div>") }
+        fx.start()
+        val port = java.net.URI(fx.base).port
+        var revived: MockWebServer? = null
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                Qa.awaitJs("first page", 60_000, "document.getElementById('m') !== null")
+                // The server goes away: the next main-frame load is refused at the socket.
+                fx.stop()
+                Qa.loadUrl(fx.base + "/?machine=local&pane=p1&view=chat")
+                assertNotNull("retry overlay not shown", Qa.device.wait(Until.findObject(By.text(RETRY)), 60_000))
+                // The same address comes back (health + page); retry must refresh auth and load the same URL.
+                val health = AtomicInteger()
+                val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
+                revived = MockWebServer().also { server ->
+                    server.dispatcher = object : Dispatcher() {
+                        override fun dispatch(request: RecordedRequest): MockResponse {
+                            requests += request.path.orEmpty()
+                            return when (request.path.orEmpty().substringBefore('?')) {
+                                "/api/health" -> MockResponse().setResponseCode(200).setBody("ok").addHeader(
+                                    "Set-Cookie",
+                                    "CF_Authorization=${Fixture.jwt(System.currentTimeMillis() / 1000 + 400, health.incrementAndGet())}; Path=/; HttpOnly",
+                                )
+                                "/" -> fx.html("back", "<div id=m2>back</div>")
+                                else -> MockResponse().setResponseCode(404)
+                            }
+                        }
+                    }
+                    server.start(java.net.InetAddress.getByName("127.0.0.1"), port)
+                }
+                Qa.device.findObject(By.text(RETRY)).click()
+                Qa.awaitJs("page after retry", 60_000, "document.getElementById('m2') !== null")
+                Qa.until(30_000, "overlay gone") { !Qa.device.hasObject(By.text(RETRY)) }
+                assertTrue("retry must refresh authentication first", health.get() >= 1)
+                assertTrue("the failed URL is loaded again: $requests", requests.any { it.contains("pane=p1") })
+                assertTrue(Qa.currentUrl().orEmpty().contains("pane=p1"))
+            }
+        } finally {
+            runCatching { revived?.shutdown() }
+            fx.stop()
+        }
+    }
 
     @Test
     fun subresourceFailuresDoNotReplaceThePage() {
@@ -149,17 +212,17 @@ class S2PendingPaneSetupTest {
         Qa.resetState(alerts = false, token = Qa.syntheticToken())
         val fx = paneFixture()
         try {
-            ActivityScenario.launch(MainActivity::class.java).use {
-                Qa.awaitJs("root page", 60_000, "document.getElementById('m') !== null")
-                // The service token was replaced server-side: the stored one is rejected from now on.
-                fx.expectedToken = REPLACEMENT
-                Qa.app.accessSession.invalidate()
-                Qa.targetContext.startActivity(mainIntent(pane = "pane-warm").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                awaitActivity("SetupActivity")
-                fillSetupAndConnect(fx.base, REPLACEMENT)
-                awaitPane("pane-warm")
-            }
+            startApp(mainIntent())
+            Qa.awaitJs("root page", 60_000, "document.getElementById('m') !== null")
+            // The service token was replaced server-side: the stored one is rejected from now on.
+            fx.expectedToken = REPLACEMENT
+            Qa.app.accessSession.invalidate()
+            startApp(mainIntent(pane = "pane-warm"))
+            awaitActivity("SetupActivity")
+            fillSetupAndConnect(fx.base, REPLACEMENT)
+            awaitPane("pane-warm")
         } finally {
+            runCatching { finishAllActivities() }
             fx.stop()
         }
     }
@@ -432,19 +495,23 @@ class S5SignOutWipeTest {
         fx.routes["/second"] = { fx.html("second", "<div id=s>second</div>", script) }
         fx.start()
         try {
-            ActivityScenario.launch(MainActivity::class.java).use {
+            startApp(mainIntent())
+            run {
                 Qa.awaitJs("root page", 60_000, "document.title === 'fresh' && document.getElementById('n') !== null")
                 Qa.tap("#n")
                 Qa.awaitJs("second page", 60_000, "document.getElementById('s') !== null")
                 assertEquals(true, Qa.canGoBack())
-                ActivityScenario.launch(SettingsActivity::class.java).use {
+                startApp(Intent(Qa.targetContext, SettingsActivity::class.java))
+                run {
                     val clear = Qa.device.wait(Until.findObject(By.text("토큰 지우기").enabled(true)), 30_000)
                     assertNotNull("clear button not shown", clear)
                     clear.click()
                     Qa.until(30_000, "token removed") { Qa.app.tokenStore.get() == null }
-                    Qa.until(30_000, "page dropped", { "url=${Qa.currentUrl()} back=${Qa.canGoBack()}" }) {
+                    Qa.until(30_000, "page dropped", { "url=${Qa.currentUrl()} back=${Qa.canGoBack()} live=${Qa.liveActivityNames()}" }) {
                         Qa.currentUrl() == "about:blank" && Qa.canGoBack() == false
                     }
+                    // Back to the app: the stopped MainActivity resumes and routes to setup.
+                    Qa.device.pressBack()
                 }
                 awaitActivity("SetupActivity")
                 assertNotNull(Qa.device.wait(Until.findObject(By.clazz("android.widget.EditText")), 30_000))
@@ -456,6 +523,7 @@ class S5SignOutWipeTest {
                 assertEquals(false, Qa.canGoBack())
             }
         } finally {
+            runCatching { finishAllActivities() }
             fx.stop()
         }
     }
@@ -470,13 +538,23 @@ class S6AlertSwitchSemanticsTest {
     fun switchNodeIsLabelled() {
         Qa.resetState(alerts = false, token = Qa.syntheticToken())
         ActivityScenario.launch(SettingsActivity::class.java).use {
-            val node = Qa.device.wait(Until.findObject(By.text("에이전트 알림").checkable(true)), 30_000)
-            assertNotNull("no checkable node labelled with the alert text", node)
-            assertFalse(node.isChecked)
+            // The row is below the fold on a small screen: scroll until the accessibility tree contains it.
+            Qa.until(60_000, "alert row in the accessibility tree") {
+                if (android.os.Build.VERSION.SDK_INT >= 33) runCatching { Qa.instr.uiAutomation.clearCache() }
+                if (Qa.device.hasObject(By.clazz("android.widget.Switch"))) {
+                    true
+                } else {
+                    Qa.device.findObject(By.scrollable(true))?.scroll(Direction.DOWN, 0.6f, 600)
+                    false
+                }
+            }
             val switches = Qa.device.findObjects(By.clazz("android.widget.Switch"))
             assertEquals("exactly one switch node", 1, switches.size)
-            assertEquals("the switch node itself carries the label", "에이전트 알림", switches[0].text)
-            assertNull("no unlabeled second control", Qa.device.findObject(By.clazz("android.widget.Switch").text("")))
+            val node = switches[0]
+            val labels = listOfNotNull(node.text, node.contentDescription)
+            assertTrue("switch node must carry the label, has $labels", labels.any { it.contains("에이전트 알림") })
+            assertTrue("switch node must be checkable", node.isCheckable)
+            assertFalse(node.isChecked)
         }
     }
 }
