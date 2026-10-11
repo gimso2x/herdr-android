@@ -27,6 +27,7 @@ class StatusWatcherService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var loop: Job? = null
     private var connected: Boolean? = null
+    private lateinit var wakeLock: WatchWakeLock
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -34,6 +35,7 @@ class StatusWatcherService : Service() {
         super.onCreate()
         WatchNotifications.ensureChannels(this)
         AppForeground.init()
+        wakeLock = WatchWakeLock.forContext(this)
         val app = application as HerdrApplication
         val baseUrl = HerdrConfig.baseUrl
         val client = OkHttpClient.Builder()
@@ -75,7 +77,18 @@ class StatusWatcherService : Service() {
             return START_NOT_STICKY
         }
         isRunningFlow.value = true
-        if (loop == null) loop = scope.launch { runLoop() }
+        if (loop == null) {
+            // Held for as long as watching is enabled so the 15 s loop also fires while an
+            // (exempted) device sits idle with the screen off; every stop path drops it.
+            wakeLock.hold()
+            loop = scope.launch {
+                try {
+                    runLoop()
+                } finally {
+                    wakeLock.drop()
+                }
+            }
+        }
         return START_STICKY
     }
 
@@ -97,6 +110,7 @@ class StatusWatcherService : Service() {
         scope.cancel()
         WatchRuntime.poller?.close()
         WatchRuntime.poller = null
+        if (::wakeLock.isInitialized) wakeLock.drop()
         isRunningFlow.value = false
         super.onDestroy()
     }
