@@ -53,7 +53,7 @@ jobs:
           # AOSP image: no Play services (same as the instrumented job).
           target: default
           arch: x86_64
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -no-metrics
+          emulator-options: -no-window -gpu swangle_indirect -no-snapshot -no-boot-anim -no-metrics
           disk-size: 4096M
           ram-size: 4096M
           heap-size: 512M
