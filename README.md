@@ -60,6 +60,15 @@ bash scripts/release.sh 0.1.0
 작업 트리가 깨끗하고 태그가 없을 때만 실행됩니다. `versionName`/`versionCode`를 올리고 `chore(release): <버전>` 커밋과 주석 태그를 만들어 푸시한 뒤, 태그 빌드를 기다려 서명된 APK를 `dist/<버전>/app-release.apk`에 받고 URL과 sha256을 출력합니다.
 수동 워크플로 `upgrade.yml`(`from_tag`, `to_tag`)은 에뮬레이터(API 34)에서 이전 APK 위에 새 APK를 덮어 설치해 `firstInstallTime` 유지와 `versionCode` 증가를 확인합니다.
 
+## CI 두 단계 (개발자용)
+
+`android.yml`은 단계를 하나만 고릅니다. 단계별 phase 목록은 `ci/instrumented.sh --tier fast|full`이 유일한 기준입니다.
+
+- **fast** (브랜치 push, pull request): 빌드 + 단위 테스트 + lint, 그리고 API 34 에뮬레이터에서 fixture 단계만(라이브 L1-L4 제외). 시크릿이 필요 없어 PR에서도 돕니다.
+- **full** (`v*` 태그, 매주 일요일 18:00 UTC 스케줄, 수동 실행): API 34 전체 단계(라이브 L1-L4 포함) + API 35 부분 집합. 릴리스 잡은 빌드와 두 에뮬레이터 잡이 모두 통과해야만 실행됩니다.
+
+수동으로 full을 돌리려면 `gh workflow run android.yml -f tier=full --ref main`을 실행합니다.
+
 ## 서명 키 백업
 
 릴리스 서명 키는 서버의 `~/.config/herdr-android/signing/`(`herdr-release.jks`, `signing.properties`, 권한 700/600)에 있습니다. **이 폴더를 별도로 백업하세요.** 잃어버리면 같은 서명으로 업데이트할 수 없어 앱을 지우고 다시 설치해야 하고, 그때 저장된 토큰도 사라집니다.

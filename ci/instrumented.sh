@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
 # Emulator QA harness. Run as the android-emulator-runner `script` (the emulator is already booted):
 #
-#   ci/instrumented.sh <api-level>
+#   ci/instrumented.sh <api-level> [--tier fast|full]    (default tier: full)
 #
-# API 34 runs every phase, any other API only the lifecycle/inset subset (F5, F6, W1-W4) plus the onboarding phase O1.
-# QA_PHASES (space separated group ids, e.g. "L1 W3") restricts a run for debugging; a full run
-# leaves it empty. Credentials: the workflow writes $RUNNER_TEMP/qa-token.json, this script pushes
-# it to /data/local/tmp and the trap removes both. No `set -x`, nothing secret is echoed.
+# This script is the single source of truth for which phases run where:
+#   full: API 34 runs every phase (incl. live L1-L4); any other API only the lifecycle/inset subset
+#         (F5, F6, W1-W4) plus the onboarding phase O1 and U1.
+#   fast: the same lists minus the live groups L1-L4 (fixture-only; no credentials, no live server).
+# QA_PHASES (space separated group ids, e.g. "L1 W3") restricts a run for debugging; a normal run
+# leaves it empty. Credentials (full tier only): the workflow writes $RUNNER_TEMP/qa-token.json, this
+# script pushes it to /data/local/tmp and the trap removes both. No `set -x`, nothing secret is echoed.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-API="${1:?usage: ci/instrumented.sh <api-level>}"
+API="${1:?usage: ci/instrumented.sh <api-level> [--tier fast|full]}"
+TIER=full
+if [ "${2:-}" = "--tier" ]; then TIER="${3:?--tier needs fast or full}"; elif [ -n "${2:-}" ]; then echo "unknown argument: $2" >&2; exit 2; fi
+case "$TIER" in fast|full) ;; *) echo "unknown tier: $TIER (fast|full)" >&2; exit 2 ;; esac
 PKG=com.gimso2x.herdr
 RUNNER=com.gimso2x.herdr.test/androidx.test.runner.AndroidJUnitRunner
 TEST_PKG=com.gimso2x.herdr.qa
@@ -65,7 +71,16 @@ declare -A CLASSES=(
 )
 FULL_ORDER="L1 L2 L3 L4 G1 A1 A2 F1 F2 F3 F4 F5 F6 C1 C2 C3 C4 C5 R1 W1 W2 W3 W4 O1 O2 U1 Sstore Scookie"
 SUBSET_ORDER="F5 F6 W1 W2 W3 W4 O1 U1"
+LIVE_GROUPS="L1 L2 L3 L4"
 if [ "$API" = "34" ]; then ALLOWED="$FULL_ORDER"; else ALLOWED="$SUBSET_ORDER"; fi
+if [ "$TIER" = "fast" ]; then
+  # Fast tier: fixture phases only. Drop the live groups (they need the owner's live server).
+  FAST_ALLOWED=""
+  for g in $ALLOWED; do
+    [[ " $LIVE_GROUPS " == *" $g "* ]] || FAST_ALLOWED+="$g "
+  done
+  ALLOWED="${FAST_ALLOWED% }"
+fi
 
 selected() {
   [[ " $ALLOWED " == *" $1 "* ]] || return 1
@@ -343,7 +358,8 @@ group() {
 
 # --- build, install, prepare the device -----------------------------------------------------
 
-if [ ! -s "$TOKEN_FILE" ]; then
+# The fast tier is fixture-only and never receives credentials; only the full tier needs the token file.
+if [ "$TIER" = "full" ] && [ ! -s "$TOKEN_FILE" ]; then
   echo "qa-token.json was not written by the workflow"
   exit 1
 fi
@@ -356,7 +372,9 @@ fi
 # The install build leaves a Kotlin daemon behind; the emulator needs that memory.
 pkill -f KotlinCompileDaemon >/dev/null 2>&1 || true
 free -m
-adb push "$TOKEN_FILE" "$DEVICE_TOKEN" >/dev/null || { echo "could not push the qa token"; exit 1; }
+if [ "$TIER" = "full" ]; then
+  adb push "$TOKEN_FILE" "$DEVICE_TOKEN" >/dev/null || { echo "could not push the qa token"; exit 1; }
+fi
 adb shell input keyevent KEYCODE_WAKEUP
 adb shell wm dismiss-keyguard
 # The soft keyboard must show even though the emulator reports a hardware keyboard (F4, F5).
