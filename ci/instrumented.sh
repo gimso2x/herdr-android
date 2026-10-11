@@ -34,6 +34,9 @@ MEM_LOG="$(mktemp)"
   done ) >"$MEM_LOG" 2>&1 &
 SAMPLER=$!
 EV_LOG=/dev/null
+PROBE_LOG=/dev/null
+# Host process output of the emulator; the workflow redirects it here only on debug runs with a gpu list.
+EMULATOR_LOG=/tmp/emulator.log
 FAILED=()
 RAN=()
 
@@ -45,7 +48,7 @@ purge_live_evidence() {
 }
 
 cleanup() {
-  kill "$SAMPLER" "${EV_PID:-}" 2>/dev/null || true
+  kill "$SAMPLER" "${EV_PID:-}" "${PROBE_PID:-}" 2>/dev/null || true
   adb pull /sdcard/Download/qa/. "$OUT/" >/dev/null 2>&1 || true
   purge_live_evidence
   adb shell rm -f "$DEVICE_TOKEN" >/dev/null 2>&1 || true
@@ -69,6 +72,7 @@ declare -A CLASSES=(
   [O2]="O2PermissionRequestTest"
   [U1]="U1UpgradePathTest U2SettingsChangeTest"
   [Sstore]="SStoreWriteTest SStoreReadTest" [Scookie]="SCookieWipeTest"
+  [P0]="P0RenderProbeFixtureTest" [P1]="P1RenderProbeLiveTest"
 )
 FULL_ORDER="L1 L2 L3 L4 G1 A1 A2 F1 F2 F3 F4 F5 F6 C1 C2 C3 C4 C5 R1 W1 W2 W3 W4 O1 O2 U1 Sstore Scookie"
 SUBSET_ORDER="F5 F6 W1 W2 W3 W4 O1 U1"
@@ -82,6 +86,10 @@ if [ "$TIER" = "fast" ]; then
   done
   ALLOWED="${FAST_ALLOWED% }"
 fi
+# Debug runs that name phases (QA_PHASES) may run any group on any API, plus the render probes P0 (fixture
+# page) and P1 (live page): counts of canvases/WebGL/images/WebSocket bytes, logged to tag RenderProbe.
+PROBE_GROUPS="P0 P1"
+if [ "$TIER" = "full" ] && [ -n "${QA_PHASES:-}" ]; then ALLOWED="$FULL_ORDER $PROBE_GROUPS"; fi
 
 selected() {
   [[ " $ALLOWED " == *" $1 "* ]] || return 1
@@ -132,11 +140,25 @@ emulator_death_facts() {
   free -m | sed -n 1,3p
   { sudo -n dmesg 2>/dev/null || dmesg 2>/dev/null; } | grep -iE "out of memory|oom-kill|killed process|qemu|segfault|general protection" | tail -n 8 | cut -c1-200
   ls -1 /tmp/android-runner 2>/dev/null | head -n 5
+  echo "emulator stderr/-verbose log, last 40 lines (host process output, 200 cols; empty without -verbose redirect):"
+  tail -n 40 "$EMULATOR_LOG" 2>/dev/null | cut -c1-200
+  echo "render probe lines logged before the death:"
+  cut -c1-700 "$PROBE_LOG" 2>/dev/null | tail -n 12
+  echo "crashing thread top frames (module!function only):"
+  python3 ci/crash_frames.py 2>&1 | cut -c1-200 | head -n 24
   ls -1 "$HOME/.android" 2>/dev/null | grep -iE "crash|hs_err|emu-" | head -n 5
   echo "last guest events/crash lines (process-level buffers, 160 cols):"
   tail -n 30 "$EV_LOG" 2>/dev/null | cut -c1-160
   ls -1R /tmp/android-runner 2>/dev/null | head -n 12
   echo "--- end emulator death facts"
+}
+
+# Render probe counts (P0/P1) from the host-side stream: they survive an emulator death.
+print_probe_lines() {
+  sleep 2
+  echo "--- render probe counts (canvases, contexts, image pixels, websocket bytes; no page content)"
+  cut -c1-900 "$PROBE_LOG" 2>/dev/null | tail -n 24
+  echo "--- end render probe counts"
 }
 
 # One instrumentation phase: the output must contain `OK (`; the exit code alone proves nothing.
@@ -171,8 +193,10 @@ run_phase() {
   [ -s "$OUT/$cls-facts.txt" ] || rm -f "$OUT/$cls-facts.txt"
   if grep -q '^OK (' "$out" && ! grep -q 'FAILURES!!!' "$out"; then
     echo "=== phase $cls: OK"
+    case "$cls" in P*) print_probe_lines ;; esac
   else
     fail "phase $cls did not report OK"
+    case "$cls" in P*) print_probe_lines ;; esac
     case "$cls" in
       L*) ;;
       *)
@@ -383,6 +407,9 @@ fi
 EV_LOG="$(mktemp)"
 adb logcat -b events,crash -v time >"$EV_LOG" 2>&1 &
 EV_PID=$!
+PROBE_LOG="$(mktemp)"
+adb logcat -s RenderProbe -v raw >"$PROBE_LOG" 2>&1 &
+PROBE_PID=$!
 adb shell input keyevent KEYCODE_WAKEUP
 adb shell wm dismiss-keyguard
 # The soft keyboard must show even though the emulator reports a hardware keyboard (F4, F5).
@@ -394,7 +421,7 @@ adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS
 # Harness warm-up (keyboard process cold start); skipped for debug runs that name phases.
 if [ -z "${QA_PHASES:-}" ] || [[ " $QA_PHASES " == *" Warmup "* ]]; then run_phase ImeWarmupTest; fi
 
-for g in $FULL_ORDER; do
+for g in $PROBE_GROUPS $FULL_ORDER; do
   if selected "$g"; then group "$g"; fi
 done
 

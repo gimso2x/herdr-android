@@ -20,12 +20,17 @@ object LiveQaGuard {
      * every non-GET request, plus the metrics probe. See the header of the asset.
      */
     const val DIAG_ASSET = "diag_probe.js"
+    const val COUNTS_ASSET = "render_counts.js"
 
     @Volatile
     private var origin: String? = null
 
     @Volatile
     private var asset: String = ASSET
+
+    /** Render-load counters (assets/render_counts.js) installed after the guard; probe phases only. */
+    @Volatile
+    private var counting: Boolean = false
 
     /** [origin] is scheme://host[:port], e.g. `https://herdr.example.com`. */
     fun enable(origin: String) {
@@ -35,6 +40,7 @@ object LiveQaGuard {
         }
         this.origin = origin
         this.asset = ASSET
+        this.counting = false
     }
 
     /** Like [enable] but installs the narrowed diagnostic guard and probe instead of the read-only guard. */
@@ -43,9 +49,16 @@ object LiveQaGuard {
         asset = DIAG_ASSET
     }
 
+    /** Like [enable] (read-only guard) plus the render-load counters read through `window.__qaRenderSnap()`. */
+    fun enableCounting(origin: String) {
+        enable(origin)
+        counting = true
+    }
+
     fun disable() {
         origin = null
         asset = ASSET
+        counting = false
     }
 
     val isEnabled: Boolean get() = origin != null
@@ -61,6 +74,10 @@ object LiveQaGuard {
         check(isSupported()) { "DOCUMENT_START_SCRIPT unsupported; refusing to load the live site unguarded" }
         val script = context.assets.open(asset).bufferedReader().use { it.readText() }
         WebViewCompat.addDocumentStartJavaScript(webView, script, setOf(origin))
+        if (counting) {
+            val counts = context.assets.open(COUNTS_ASSET).bufferedReader().use { it.readText() }
+            WebViewCompat.addDocumentStartJavaScript(webView, counts, setOf(origin))
+        }
         return true
     }
 }
