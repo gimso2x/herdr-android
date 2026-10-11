@@ -145,7 +145,7 @@ class WatchPoller(
         try {
             reader.await()
         } catch (e: CancellationException) {
-            cancel()
+            this@readBody.cancel() // the Call, not the CoroutineScope.cancel() extension
             throw e
         }
     }
