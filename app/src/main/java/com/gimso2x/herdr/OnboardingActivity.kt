@@ -41,9 +41,8 @@ import com.gimso2x.herdr.ui.OnboardingStep
 import com.gimso2x.herdr.ui.StepStatus
 
 /**
- * First-run checklist: notification permission, battery optimization, sleeping-app pause. Statuses are
- * re-read on every resume, so coming back from a system screen updates the rows. "시작하기" is always
- * allowed; unfinished essentials only produce a warning line.
+ * First-run notification permission checklist. Push delivery does not require a resident service or
+ * battery exemption. Status is re-read after returning from system settings; start stays available.
  */
 class OnboardingActivity : ComponentActivity() {
     private val prefs by lazy { AppPreferences(this) }
@@ -76,19 +75,12 @@ class OnboardingActivity : ComponentActivity() {
     private fun refresh() {
         state = OnboardingState.from(
             notificationsEnabled = SystemSettings.notificationsEnabled(this),
-            ignoringBattery = SystemSettings.ignoringBatteryOptimizations(this),
-            autoRevokeExempt = SystemSettings.autoRevokeExempt(this),
-            isSamsung = Build.MANUFACTURER.equals("samsung", ignoreCase = true),
-            sdk = Build.VERSION.SDK_INT,
         )
     }
 
     private fun onAction(step: OnboardingStep) {
         when (step) {
             OnboardingStep.NOTIFICATIONS -> requestNotifications()
-            OnboardingStep.BATTERY -> SystemSettings.requestIgnoreBatteryOptimizations(this)
-            OnboardingStep.AUTO_REVOKE -> SystemSettings.openAutoRevokeSettings(this)
-            OnboardingStep.SAMSUNG -> SystemSettings.openAppDetails(this)
         }
     }
 
@@ -177,9 +169,6 @@ private fun StepCard(row: OnboardingRow, onAction: (OnboardingStep) -> Unit) {
     val button: Int
     when (row.step) {
         OnboardingStep.NOTIFICATIONS -> { title = R.string.onboarding_notifications; button = R.string.onboarding_notifications_button }
-        OnboardingStep.BATTERY -> { title = R.string.onboarding_battery; button = R.string.onboarding_battery_button }
-        OnboardingStep.AUTO_REVOKE -> { title = R.string.onboarding_auto_revoke; button = R.string.onboarding_auto_revoke_button }
-        OnboardingStep.SAMSUNG -> { title = R.string.onboarding_samsung; button = R.string.onboarding_samsung_button }
     }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -195,7 +184,6 @@ private fun StepCard(row: OnboardingRow, onAction: (OnboardingStep) -> Unit) {
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
                 )
-                StepStatus.INFO -> Unit
             }
             OutlinedButton(onClick = { onAction(row.step) }) { Text(stringResource(button)) }
         }

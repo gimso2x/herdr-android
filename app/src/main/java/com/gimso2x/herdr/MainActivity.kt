@@ -400,6 +400,7 @@ class MainActivity : ComponentActivity() {
                 // The Compose host holds the initial focus; without view focus the page reports
                 // document.hasFocus() == false (clipboard writes are refused, the keyboard may not show).
                 view.requestFocus()
+                com.gimso2x.herdr.watch.WatchTestHooks.pageFinished(url)
             }
         }
         view.webChromeClient = chromeClient

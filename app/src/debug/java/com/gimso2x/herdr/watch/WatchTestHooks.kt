@@ -1,25 +1,38 @@
 package com.gimso2x.herdr.watch
 
-import com.gimso2x.herdr.access.Clock
-import kotlinx.coroutines.flow.StateFlow
+import android.content.Context
+import com.gimso2x.herdr.HerdrApplication
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 
-/**
- * Debug builds only: seams for instrumented tests, a controllable clock and an on-demand poll.
- * Release builds get a stub (src/release) that exposes the real clock and nothing else.
- */
+/** Debug-only injection at the actual message handler; release has no injection API. */
 object WatchTestHooks {
-    /** Time source of the running service's [StatusTracker]; replace to fake turn lengths. */
-    @Volatile
-    var clock: Clock = Clock.SYSTEM
+    @Volatile var firebaseToken: String? = null
+    @Volatile var externalRegistration: Boolean = false
+    data class Receipt(val eventId: String, val posted: Boolean, val workId: String?)
+    private val incoming = MutableSharedFlow<Receipt>(extraBufferCapacity = 16)
+    val receipts: SharedFlow<Receipt> = incoming.asSharedFlow()
+    private val pages = MutableSharedFlow<String>(extraBufferCapacity = 16)
+    val finishedPages: SharedFlow<String> = pages.asSharedFlow()
+    fun pageFinished(url: String?) { if (url != null) pages.tryEmit(url) }
 
-    val lastPoll: StateFlow<PollResult> get() = WatchRuntime.lastPoll
+    fun received(event: PushEvent, posted: Boolean, workId: String?) {
+        incoming.tryEmit(Receipt(event.eventId, posted, workId))
+    }
 
-    /**
-     * Runs one poll now and returns after it completes, including the alert detail fetches it started
-     * (so the posted notifications are final); [PollOutcome.NOT_RUNNING] when no service is up.
-     */
-    suspend fun pollNow(): PollResult {
-        val poller = WatchRuntime.poller ?: return PollResult(-1, PollOutcome.NOT_RUNNING)
-        return poller.pollOnce().also { poller.awaitDetails() }
+    fun receive(context: Context, data: Map<String, String>, sentAt: Long = System.currentTimeMillis()): Boolean =
+        PushReceiver.receive(context, data, sentAt)
+
+    fun reset(context: Context) {
+        val app = context.applicationContext as HerdrApplication
+        PushRegistration.stop(app)
+        synchronized(PushStore.lock) {
+            app.pushStore.token = null
+            app.pushStore.clearEvents()
+            app.pushStore.saveRegistrations(emptyList())
+        }
+        firebaseToken = null
+        externalRegistration = false
     }
 }

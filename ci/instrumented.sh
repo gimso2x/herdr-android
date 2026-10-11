@@ -249,10 +249,6 @@ run_phase() {
   fi
 }
 
-# Diagnostics for the host-orchestrated boot phases: app log tags only (no token is ever logged).
-dump_boot_log() {
-  adb logcat -d -s HerdrBoot HerdrWatch AndroidRuntime:E ActivityManager:W >"$OUT/W3-logcat-$1.txt" 2>&1 || true
-}
 
 wait_until() { # seconds command...
   local deadline=$((SECONDS + $1))
@@ -263,53 +259,6 @@ wait_until() { # seconds command...
   done
 }
 
-HOST="$OUT/W3-host.txt"
-hc() { echo "W3 host-check: $*" | tee -a "$HOST"; }
-
-service_foreground() {
-  local dump
-  dump=$(adb shell dumpsys activity services "$PKG" 2>/dev/null)
-  grep -q 'StatusWatcherService' <<<"$dump" && grep -q 'isForeground=true' <<<"$dump"
-}
-service_absent() {
-  ! adb shell dumpsys activity services "$PKG" 2>/dev/null | grep -q 'StatusWatcherService'
-}
-channel_listed() {
-  local dump
-  dump=$(adb shell dumpsys notification --noredact 2>/dev/null)
-  grep -q "$PKG" <<<"$dump" && grep -q 'herdr_watch' <<<"$dump"
-}
-boot_log_has() {
-  adb logcat -d -s HerdrBoot 2>/dev/null | grep -qF "$1"
-}
-is_root() { [ "$(adb shell id -u 2>/dev/null | tr -d '\r\n')" = "0" ]; }
-
-# Force-stop, become root (only root may send the protected BOOT_COMPLETED), broadcast to the stopped app.
-boot_broadcast() {
-  adb shell am force-stop "$PKG"
-  adb wait-for-device
-  # adbd restarts on every root/unroot: "unable to connect for root: closed" means it is not back yet.
-  root_ok() { adb root >"$OUT/adb-root.txt" 2>&1; }
-  if ! wait_until 45 root_ok; then
-    fail "adb root failed: $(tr '\n' ' ' <"$OUT/adb-root.txt")"
-    return 1
-  fi
-  adb wait-for-device
-  if ! wait_until 30 is_root; then
-    fail "adb shell is not uid 0 after adb root"
-    return 1
-  fi
-  hc "adb root: shell uid 0"
-  adb logcat -c
-  local result
-  result=$(adb shell am broadcast --include-stopped-packages -a android.intent.action.BOOT_COMPLETED -p "$PKG" 2>&1)
-  if grep -q 'Broadcast completed' <<<"$result"; then
-    hc "BOOT_COMPLETED delivered with --include-stopped-packages to the force-stopped app"
-  else
-    fail "BOOT_COMPLETED broadcast was not accepted"
-    return 1
-  fi
-}
 
 unroot() {
   adb unroot >/dev/null 2>&1 || true
@@ -317,53 +266,6 @@ unroot() {
   wait_until 30 adb shell true >/dev/null 2>&1 || true
 }
 
-w3_group() {
-  : >"$HOST"
-  run_phase W3SeedOnTest
-  # A real boot sends BOOT_COMPLETED with the system's temporary foreground-service allowlist; a
-  # shell broadcast has none ("Background started FGS: Disallowed"). The power allowlist is the
-  # documented equivalent exemption, so the FGS start path itself can still be exercised.
-  adb shell cmd deviceidle whitelist "+$PKG" >/dev/null 2>&1 || true
-  if boot_broadcast; then
-    if wait_until 30 boot_log_has "boot: starting"; then
-      hc "logcat HerdrBoot: boot: starting"
-    else
-      fail "HerdrBoot did not log 'boot: starting'"
-    fi
-    if wait_until 30 service_foreground; then
-      hc "StatusWatcherService running with isForeground=true"
-    else
-      fail "StatusWatcherService never reached isForeground=true after BOOT_COMPLETED"
-    fi
-    if wait_until 30 channel_listed; then
-      hc "dumpsys notification --noredact lists channel herdr_watch for $PKG"
-    else
-      fail "channel herdr_watch not listed for $PKG"
-    fi
-    dump_boot_log on
-  fi
-  adb shell cmd deviceidle whitelist "-$PKG" >/dev/null 2>&1 || true
-  unroot
-
-  run_phase W3SeedOffTest
-  if boot_broadcast; then
-    if wait_until 30 boot_log_has "boot: alerts off, not starting"; then
-      hc "logcat HerdrBoot: boot: alerts off, not starting"
-      if service_absent; then
-        hc "dumpsys activity services shows no StatusWatcherService after the alerts-off boot"
-      else
-        fail "StatusWatcherService is present after the alerts-off boot"
-      fi
-    else
-      fail "HerdrBoot did not log 'boot: alerts off, not starting'"
-    fi
-  fi
-  dump_boot_log off
-  unroot
-  adb shell am force-stop "$PKG"
-
-  run_phase W3ToggleTest
-}
 
 group() {
   case "$1" in
@@ -372,7 +274,6 @@ group() {
       adb shell pm clear-permission-flags "$PKG" android.permission.RECORD_AUDIO user-set user-fixed
       run_phase C3MicDenyTest
       ;;
-    W3) w3_group ;;
     W4)
       adb shell pm revoke "$PKG" android.permission.POST_NOTIFICATIONS
       run_phase W4PermissionOffTest

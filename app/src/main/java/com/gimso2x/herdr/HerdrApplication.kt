@@ -11,6 +11,10 @@ import com.gimso2x.herdr.access.CookieInstaller
 import com.gimso2x.herdr.access.EncryptedTokenStore
 import com.gimso2x.herdr.access.TokenStore
 import com.gimso2x.herdr.shell.AccessTestHooks
+import com.gimso2x.herdr.watch.AppForeground
+import com.gimso2x.herdr.watch.PushStore
+import com.gimso2x.herdr.watch.WatchNotifications
+import com.gimso2x.herdr.watch.WatcherController
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -32,6 +36,7 @@ class HerdrApplication : Application() {
     // Lazy: nothing touches the keystore/network from Application.onCreate; the stored address is
     // read the first time a base URL is asked for.
     val tokenStore: TokenStore by lazy { EncryptedTokenStore(this) }
+    val pushStore: PushStore by lazy { PushStore(this) }
 
     private val _sessionEnd = MutableStateFlow(SessionEndEvent(0, null))
 
@@ -44,6 +49,9 @@ class HerdrApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         HerdrConfig.install { tokenStore.getServer() }
+        AppForeground.init()
+        WatchNotifications.ensureChannels(this)
+        WatcherController.start(this)
     }
 
     /**

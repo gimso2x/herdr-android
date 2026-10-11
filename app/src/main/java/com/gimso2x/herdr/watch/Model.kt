@@ -25,8 +25,8 @@ enum class AgentStatus {
 }
 
 /**
- * One pane as seen by one poll. Every label is optional: [workspace] and [tab] are the labels of the
- * pane's workspace and tab, [agent] the agent's display name, [title] the pane's terminal title.
+ * One pane's optional labels from an authenticated push event detail.
+ * [workspace] and [tab] are display labels; [agent] and [title] describe the pane.
  */
 data class PaneSample(
     val paneId: String,
@@ -39,24 +39,10 @@ data class PaneSample(
 
 enum class AlertKind { NEEDS_INPUT, FINISHED }
 
-/** An alert for [sample]; [detail] is the optional first line of the prompt / last answer (see [AlertDetail]). */
+/** Existing alert presentation model; private [detail] is supplied by the authenticated event API. */
 data class Alert(val paneId: String, val kind: AlertKind, val sample: PaneSample, val detail: String? = null) {
     private val text: AlertText.Text get() = AlertText.format(kind, sample, detail)
     val title: String get() = text.title
     val body: String get() = text.body
     val bigText: String get() = text.bigText
-}
-
-enum class PollOutcome { NONE, OK, AUTH, NETWORK, HTTP_ERROR, PARSE_ERROR, NOT_RUNNING }
-
-/** [sequence] increases with every poll so equal outcomes still emit on a StateFlow. */
-data class PollResult(
-    val sequence: Long,
-    val outcome: PollOutcome,
-    val paneCount: Int = 0,
-    val alertCount: Int = 0,
-) {
-    companion object {
-        val NONE = PollResult(0, PollOutcome.NONE)
-    }
 }

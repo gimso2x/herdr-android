@@ -15,7 +15,7 @@ declare -gA QA_CLASSES=(
   [F1]="F1ExternalPopupTest" [F2]="F2RotationTest" [F3]="F3RecreateTest" [F4]="F4BackOrderTest" [F5]="F5ImeResizeTest" [F6]="F6ViewportUnitsTest"
   [C1]="C1FileChooserTest" [C2]="C2MicGrantTest" [C3]="C3MicDenyTest" [C4]="C4ClipboardTest" [C5]="C5FixtureDownloadTest"
   [R1]="R1ServedRevisionTest"
-  [W1]="W1NotifyTest" [W2]="W2TapNotificationTest" [W3]="W3SeedOnTest W3SeedOffTest W3ToggleTest" [W4]="W4PermissionOffTest"
+  [W1]="W1NotifyTest" [W2]="W2TapNotificationTest" [W3]="W3ToggleTest PushReconciliationTest" [W4]="W4PermissionOffTest"
   [O1]="O1SetupToOnboardingTest O1MainStartShowsOnboardingTest O1ButtonsTest O1StartTest O1WatchNotificationTest"
   [O2]="O2PermissionRequestTest"
   [U1]="U1UpgradePathTest U2SettingsChangeTest"

@@ -1,43 +1,20 @@
 package com.gimso2x.herdr.ui
 
 /** Checklist rows that carry a button, in display order. */
-enum class OnboardingStep { NOTIFICATIONS, BATTERY, AUTO_REVOKE, SAMSUNG }
+enum class OnboardingStep { NOTIFICATIONS }
 
-enum class StepStatus {
-    DONE,
-    TODO,
-
-    /** Informational row without a live status (Samsung hint). */
-    INFO,
-}
+enum class StepStatus { DONE, TODO }
 
 data class OnboardingRow(val step: OnboardingStep, val status: StepStatus)
 
-/**
- * What the onboarding checklist shows (no Android types). [showWarning] is the gentle "not done yet"
- * line for the two settings alerts cannot work without; it never blocks "시작하기".
- */
+/** Push delivery needs notification permission, not a battery or unused-app exemption. */
 data class OnboardingState(val rows: List<OnboardingRow>, val showWarning: Boolean) {
     companion object {
-        private const val R = 30
-
-        fun from(
-            notificationsEnabled: Boolean,
-            ignoringBattery: Boolean,
-            autoRevokeExempt: Boolean,
-            isSamsung: Boolean,
-            sdk: Int,
-        ): OnboardingState {
-            fun status(done: Boolean) = if (done) StepStatus.DONE else StepStatus.TODO
-            val rows = buildList {
-                add(OnboardingRow(OnboardingStep.NOTIFICATIONS, status(notificationsEnabled)))
-                add(OnboardingRow(OnboardingStep.BATTERY, status(ignoringBattery)))
-                // The "unused apps" switch only exists from Android 11.
-                if (sdk >= R) add(OnboardingRow(OnboardingStep.AUTO_REVOKE, status(autoRevokeExempt)))
-                if (isSamsung) add(OnboardingRow(OnboardingStep.SAMSUNG, StepStatus.INFO))
-            }
-            return OnboardingState(rows, showWarning = !notificationsEnabled || !ignoringBattery)
-        }
+        fun from(notificationsEnabled: Boolean): OnboardingState = OnboardingState(
+            listOf(OnboardingRow(OnboardingStep.NOTIFICATIONS,
+                if (notificationsEnabled) StepStatus.DONE else StepStatus.TODO)),
+            showWarning = !notificationsEnabled,
+        )
     }
 }
 

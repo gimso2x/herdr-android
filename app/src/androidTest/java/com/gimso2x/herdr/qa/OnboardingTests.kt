@@ -23,12 +23,6 @@ import com.gimso2x.herdr.AppPreferences
 import com.gimso2x.herdr.MainActivity
 import com.gimso2x.herdr.OnboardingActivity
 import com.gimso2x.herdr.SetupActivity
-import com.gimso2x.herdr.watch.StatusWatcherService
-import com.gimso2x.herdr.watch.WatchNotifications
-import java.util.regex.Pattern
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import org.hamcrest.CoreMatchers.anyOf
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -48,10 +42,6 @@ private object Ob {
     /** Intents of the app process stubbed to a cancelled result: the system screens never open. */
     private val ACTIONS = listOf(
         Settings.ACTION_APP_NOTIFICATION_SETTINGS,
-        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-        Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS,
-        Intent.ACTION_AUTO_REVOKE_PERMISSIONS,
-        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
         ACTION_REQUEST_PERMISSIONS,
     )
 
@@ -236,54 +226,26 @@ class O1MainStartShowsOnboardingTest {
     }
 }
 
-/** O1c: every button fires its system Intent, and the statuses are re-read on resume. */
+/** O1c: notification settings intent and real permission state refresh on resume. */
 @RunWith(AndroidJUnit4::class)
 class O1ButtonsTest {
-    @After fun tearDown() {
-        Ob.release()
-        Qa.shell("cmd deviceidle whitelist -$PKG")
-        Qa.hooksReset()
-    }
+    @After fun tearDown() { Ob.release(); Qa.hooksReset() }
 
     @Test
-    fun buttonsFireIntentsAndStatusRefreshes() {
+    fun notificationButtonFiresIntentAndResumeRefreshesState() {
         Qa.resetState(alerts = false, token = Qa.syntheticToken())
         Qa.setOnboarding(done = false, asked = true)
         Ob.stubSystemScreens()
         ActivityScenario.launch(OnboardingActivity::class.java).use { scenario ->
-            // a: POST_NOTIFICATIONS is granted by the host, so the button opens the app's notification settings.
             Ob.button("허용하기").click()
             val notification = Ob.awaitFired(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
             assertEquals(PKG, notification.getStringExtra(Settings.EXTRA_APP_PACKAGE))
-
-            // b
-            Ob.button("제한 해제하기").click()
-            val battery = Ob.awaitFired(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-            assertEquals("package:$PKG", battery.data.toString())
-
-            // c
-            Ob.button("일시중지 끄기").click()
-            val revoke = Ob.awaitFired(Intent.ACTION_AUTO_REVOKE_PERMISSIONS)
-            assertEquals("package:$PKG", revoke.data.toString())
-
-            // d: only on Samsung devices.
-            val samsung = android.os.Build.MANUFACTURER.equals("samsung", ignoreCase = true)
-            if (samsung) {
-                Ob.button("앱 설정 열기").click()
-                Ob.awaitFired(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-            } else {
-                assertFalse(Qa.device.hasObject(By.text("앱 설정 열기")))
-            }
-
-            // Status is re-evaluated on resume: whitelist the app, leave and come back.
-            Ob.toTop()
-            val before = Ob.doneCount()
             scenario.moveToState(Lifecycle.State.STARTED)
-            Qa.shell("cmd deviceidle whitelist +$PKG")
             scenario.moveToState(Lifecycle.State.RESUMED)
-            Qa.until(20_000, "battery row turned 완료 (was $before)", { "now=${Ob.doneCount()}" }) {
-                Ob.doneCount() > before
-            }
+            assertEquals(1, Ob.doneCount())
+            assertFalse(Qa.device.hasObject(By.text("제한 해제하기")))
+            assertFalse(Qa.device.hasObject(By.text("일시중지 끄기")))
+            Qa.screenshot("O1PushOnboarding.png")
         }
     }
 }
@@ -331,49 +293,19 @@ class O1StartTest {
     }
 }
 
-/** O1e: the ongoing watcher notification opens Settings (which offers the checklist again). */
+/** O1e: Settings remains accessible directly and can reopen onboarding without a waiting notification. */
 @RunWith(AndroidJUnit4::class)
 class O1WatchNotificationTest {
-    @get:Rule val grant: GrantPermissionRule = GrantPermissionRule.grant(Manifest.permission.POST_NOTIFICATIONS)
-
     @After fun tearDown() = Qa.hooksReset()
-
     @Test
-    fun watchNotificationTapOpensSettings() {
-        Qa.resetState(alerts = true, token = Qa.syntheticToken())
-        val wf = WatchFixture().start()
-        try {
-            ActivityScenario.launch(MainActivity::class.java).use {
-                runBlocking { withTimeout(30_000) { StatusWatcherService.isRunning.first { it } } }
-                // The service reports isRunning before its ongoing notification is necessarily posted: wait
-                // for it in the NotificationManager instead of racing the shade UI.
-                val manager = Qa.targetContext.getSystemService(NotificationManager::class.java)
-                Qa.until(30_000, "ongoing watcher notification posted") {
-                    manager.activeNotifications.any {
-                        it.notification.channelId == WatchNotifications.CHANNEL_WATCH && it.id == WatchNotifications.NOTIFY_WATCH
-                    }
-                }
-                val label = By.text(Pattern.compile("에이전트 알림 대기 중|연결 끊김.*"))
-                Qa.device.pressHome()
-                Qa.device.openNotification()
-                // Earlier phases leave their own notifications (download complete, system notices): on a
-                // small screen the watcher entry can sit below the fold, so scroll the shade (bounded).
-                var entry = Qa.device.wait(Until.findObject(label), 5_000)
-                var scrolls = 0
-                while (entry == null && scrolls < 6) {
-                    val w = Qa.device.displayWidth
-                    val h = Qa.device.displayHeight
-                    Qa.device.swipe(w / 2, h * 8 / 10, w / 2, h * 4 / 10, 30)
-                    scrolls++
-                    entry = Qa.device.wait(Until.findObject(label), 2_000)
-                }
-                assertNotNull("watcher notification not in the shade after $scrolls scrolls", entry)
-                entry!!.click()
-                Ob.awaitActivity("SettingsActivity")
-                assertTrue(Qa.device.wait(Until.hasObject(By.text("서비스 토큰")), 30_000) == true)
-            }
-        } finally {
-            wf.fx.stop()
+    fun settingsOpensChecklistWithoutResidentNotification() {
+        Qa.resetState(alerts = false, token = Qa.syntheticToken())
+        ActivityScenario.launch(com.gimso2x.herdr.SettingsActivity::class.java).use {
+            val button = Qa.device.wait(Until.findObject(By.text("처음 설정 안내 다시 보기")), 30_000)
+            assertNotNull(button)
+            button.click()
+            Ob.awaitActivity("OnboardingActivity")
+            assertFalse(Qa.targetContext.getSystemService(NotificationManager::class.java).activeNotifications.any { it.id == 3001 })
         }
     }
 }

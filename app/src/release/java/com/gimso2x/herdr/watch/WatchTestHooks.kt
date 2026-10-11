@@ -1,8 +1,9 @@
 package com.gimso2x.herdr.watch
 
-import com.gimso2x.herdr.access.Clock
-
-/** Release stub: no hooks exist, the watcher always uses the real clock. */
+/** Release offers neither token injection nor a message-delivery test entry point. */
 object WatchTestHooks {
-    val clock: Clock get() = Clock.SYSTEM
+    val firebaseToken: String? get() = null
+    const val externalRegistration: Boolean = false
+    fun received(event: PushEvent, posted: Boolean, workId: String?) = Unit
+    fun pageFinished(url: String?) = Unit
 }

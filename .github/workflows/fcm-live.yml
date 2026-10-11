@@ -1,0 +1,79 @@
+name: FCM live delivery
+
+on:
+  workflow_dispatch:
+    inputs:
+      installation_id:
+        description: 'Disposable test installation UUID (the server sender watches this registration)'
+        required: true
+      event_id:
+        description: 'Expected synthetic event UUID'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fcm-live-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  delivery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      FCM_INSTALLATION_ID: ${{ inputs.installation_id }}
+      FCM_EVENT_ID: ${{ inputs.event_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Validate test identifiers
+        run: |
+          uuid='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          [[ "$FCM_INSTALLATION_ID" =~ $uuid ]] && [[ "$FCM_EVENT_ID" =~ $uuid ]]
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          packages: platform-tools
+      - name: Install SDK and Firebase client configuration
+        env:
+          HERDR_GOOGLE_SERVICES_B64: ${{ secrets.HERDR_GOOGLE_SERVICES_B64 }}
+        run: |
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+          node ci/firebase-config.mjs
+      - name: Build the debug and test APKs
+        run: ./gradlew --no-daemon assembleDebug assembleDebugAndroidTest
+      - name: Enable KVM and free emulator disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/local/lib/android/sdk/ndk /opt/hostedtoolcache/CodeQL
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm-fcm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Write test Access credentials
+        env:
+          CF_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_CI }}
+          CF_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET_CI }}
+          BASE_URL: ${{ secrets.HERDR_BASE_URL }}
+        run: |
+          test -n "$CF_ID" && test -n "$CF_SECRET" && test -n "$BASE_URL"
+          umask 077
+          jq -n '{id: env.CF_ID, secret: env.CF_SECRET, baseUrl: env.BASE_URL, liveQa: true}' > "$RUNNER_TEMP/qa-token.json"
+      - name: Receive a real FCM message in the background and open its pane
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          emulator-options: -no-window -gpu swangle_indirect -no-snapshot -no-boot-anim -no-metrics -no-audio
+          disk-size: 4096M
+          ram-size: 4096M
+          heap-size: 512M
+          disable-animations: true
+          script: bash ci/fcm-live.sh
+      - name: Remove test credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/qa-token.json" app/google-services.json
+      # No screenshots, raw logcat, APKs or device tokens are uploaded by this live job.

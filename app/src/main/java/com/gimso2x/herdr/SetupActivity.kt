@@ -43,7 +43,6 @@ import com.gimso2x.herdr.access.CookieInstaller
 import com.gimso2x.herdr.ui.HerdrTheme
 import com.gimso2x.herdr.ui.SetupError
 import com.gimso2x.herdr.ui.SetupLogic
-import com.gimso2x.herdr.watch.StatusWatcherService
 import com.gimso2x.herdr.access.ServerAddress
 import com.gimso2x.herdr.access.clearAllCookies
 import com.gimso2x.herdr.watch.WatcherController
@@ -186,6 +185,7 @@ class SetupViewModel(application: Application) : AndroidViewModel(application) {
             val bootstrapper = AccessCookieBootstrapper(OkHttpClient(), server)
             when (val outcome = bootstrapper.fetch(token)) {
                 is BootstrapResult.Success -> {
+                    WatcherController.stop(app)
                     val stored = withContext(Dispatchers.IO) {
                         (addressOnly || app.tokenStore.put(token)) && app.tokenStore.putServer(server)
                     }
@@ -194,11 +194,8 @@ class SetupViewModel(application: Application) : AndroidViewModel(application) {
                         clearAllCookies()
                         HerdrConfig.setServerAddress(server)
                         CookieInstaller(server).install(outcome.setCookieHeader)
-                        // A running watcher keeps the old address/token: restart it (a stopped one starts with MainActivity).
-                        if (StatusWatcherService.isRunning.value) {
-                            WatcherController.stop(app)
-                            WatcherController.start(app)
-                        }
+                        app.accessSession.invalidate()
+                        WatcherController.start(app)
                         clientSecret = ""
                         done = true
                     } else {

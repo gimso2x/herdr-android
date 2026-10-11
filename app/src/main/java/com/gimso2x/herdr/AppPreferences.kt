@@ -6,7 +6,7 @@ import android.content.Context
 class AppPreferences(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
-    /** Whether the status watcher should run. On by default. */
+    /** Whether push registration and agent alerts are enabled. On by default. */
     var alertsEnabled: Boolean
         get() = prefs.getBoolean(KEY_ALERTS_ENABLED, true)
         set(value) {

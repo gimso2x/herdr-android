@@ -239,7 +239,8 @@ object Qa {
         HerdrConfig.setDebugBaseUrl(null)
         AccessTestHooks.reset()
         LiveQaGuard.disable()
-        WatchTestHooks.clock = Clock.SYSTEM
+        WatchTestHooks.reset(targetContext)
+        WatchTestHooks.firebaseToken = "qa-fixture-fcm-token"
     }
 
     fun cookieFor(url: String): String? = onMain { CookieManager.getInstance().getCookie(url) }

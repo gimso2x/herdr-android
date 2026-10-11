@@ -63,6 +63,10 @@ jobs:
           packages: platform-tools
       - name: Install Android SDK
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Install Firebase client configuration
+        env:
+          HERDR_GOOGLE_SERVICES_B64: ${{ secrets.HERDR_GOOGLE_SERVICES_B64 }}
+        run: node ci/firebase-config.mjs
       - name: Build the debug and test APKs before the emulator starts
         run: |
           ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest

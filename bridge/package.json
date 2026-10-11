@@ -1,0 +1,14 @@
+{
+  "name": "herdr-android-push-bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run server.ts",
+    "test": "bun test .",
+    "qa-send": "bun run send-test.ts"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.6.0",
+    "jose": "^6.1.0"
+  }
+}

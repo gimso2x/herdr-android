@@ -94,52 +94,6 @@ class AlertTextTest {
     }
 }
 
-class AlertDetailTest {
-    @Test
-    fun promptQuestionIsTheFirstLine() {
-        val body = """{"prompt":{"id":"x","agent":"claude","kind":"question","title":"Heads up","question":"Run the fixture migration?\nmore","options":[]},"suggestion":null}"""
-        assertEquals("Run the fixture migration?", AlertDetail.fromPrompt(body))
-    }
-
-    @Test
-    fun promptFallsBackToTitleAndToNothing() {
-        assertEquals("Heads up", AlertDetail.fromPrompt("""{"prompt":{"title":"Heads up","question":" "}}"""))
-        assertNull(AlertDetail.fromPrompt("""{"prompt":null,"suggestion":"x"}"""))
-        assertNull(AlertDetail.fromPrompt("""{"prompt":{}}"""))
-        assertNull(AlertDetail.fromPrompt("{}"))
-        assertNull(AlertDetail.fromPrompt("not json"))
-        assertNull(AlertDetail.fromPrompt(""))
-    }
-
-    @Test
-    fun conversationUsesTheLastAssistantText() {
-        val body = """{"source":"omp-transcript","turns":[
-          {"role":"user","parts":[{"kind":"text","text":"do it"}]},
-          {"role":"assistant","parts":[{"kind":"text","text":"old answer"}]},
-          {"role":"user","parts":[{"kind":"text","text":"again"}]},
-          {"role":"assistant","parts":[
-            {"kind":"thinking","text":"hmm"},
-            {"kind":"text","text":"Done: updated 3 files.\nDetails follow"},
-            {"kind":"tool","name":"bash","summary":"ls","input":"","output":""}]}
-        ],"cursor":null}"""
-        assertEquals("Done: updated 3 files.", AlertDetail.fromConversation(body))
-    }
-
-    @Test
-    fun conversationWithoutAnAnswerYieldsNothing() {
-        assertNull(AlertDetail.fromConversation("""{"source":"scrollback","turns":[]}"""))
-        assertNull(AlertDetail.fromConversation("""{"turns":[{"role":"user","parts":[{"kind":"text","text":"hi"}]}]}"""))
-        // The newest assistant turn has no text: never reach back to an older answer.
-        assertNull(
-            AlertDetail.fromConversation(
-                """{"turns":[{"role":"assistant","parts":[{"kind":"text","text":"old"}]},
-                   {"role":"assistant","parts":[{"kind":"tool","name":"x","summary":"","input":"","output":""}]}]}""",
-            ),
-        )
-        assertNull(AlertDetail.fromConversation("{}"))
-        assertNull(AlertDetail.fromConversation("[]"))
-    }
-}
 
 class AlertLockScreenTextTest {
     @Test

@@ -85,6 +85,17 @@ jobs:
           echo "tier: $tier"
           printf '%s\n' "$validated"
 
+  bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --cwd bridge --frozen-lockfile
+      - run: bun test bridge
+
   build:
     needs: [plan]
     runs-on: ubuntu-latest
@@ -103,11 +114,16 @@ jobs:
           packages: platform-tools
       - name: Install Android SDK
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Install Firebase client configuration
+        env:
+          HERDR_GOOGLE_SERVICES_B64: ${{ secrets.HERDR_GOOGLE_SERVICES_B64 }}
+        run: node ci/firebase-config.mjs
       - name: CI script self-tests
         run: |
           for f in ci/*.sh scripts/*.sh gradlew; do bash -n "$f"; done
           ci/selftest.sh
           scripts/release-selftest.sh
+          node --test ci/firebase-config.test.mjs
       - name: Throwaway signing key for the release build check
         # The build job never sees the production signing secrets: the minified release build is only verified
         # (R8, resources, signing) with a key generated here and discarded with the runner.
@@ -279,7 +295,7 @@ jobs:
     # Release qualification is the default full run of a TAG PUSH only. A manual dispatch (which may carry
     # apis/phases/gpus overrides, or a reduced matrix) never publishes, even on a tag ref.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.plan.outputs.tier == 'full'
-    needs: [plan, build, instrumented]
+    needs: [plan, build, instrumented, bridge]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -296,6 +312,10 @@ jobs:
           packages: platform-tools
       - name: Install Android SDK
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Install Firebase client configuration
+        env:
+          HERDR_GOOGLE_SERVICES_B64: ${{ secrets.HERDR_GOOGLE_SERVICES_B64 }}
+        run: node ci/firebase-config.mjs
       # No third-party action runs after this point: the keystore only exists for the commands below.
       - name: Decode signing keystore
         env:

@@ -3,11 +3,14 @@ package com.gimso2x.herdr.watch
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
-import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
-/** Whether an app activity is visible; alerts are suppressed then (adapted from ompgui). */
+/** Whether an app activity is visible; process lifecycle owns alert suppression. */
 object AppForeground {
-    private val foreground = AtomicBoolean(false)
+    private val foreground = MutableStateFlow(false)
+    val state: StateFlow<Boolean> = foreground.asStateFlow()
     private var registered = false
 
     /** Main thread only. Safe to repeat; a late observer is replayed the current state. */
@@ -16,20 +19,10 @@ object AppForeground {
         if (registered) return
         registered = true
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) {
-                foreground.set(true)
-            }
-
-            override fun onStop(owner: LifecycleOwner) {
-                foreground.set(false)
-            }
+            override fun onStart(owner: LifecycleOwner) { foreground.value = true }
+            override fun onStop(owner: LifecycleOwner) { foreground.value = false }
         })
     }
 
-    fun isForeground(): Boolean = foreground.get()
-
-    /** Test-only override. */
-    fun setForegroundForTest(value: Boolean) {
-        foreground.set(value)
-    }
+    fun isForeground(): Boolean = foreground.value
 }

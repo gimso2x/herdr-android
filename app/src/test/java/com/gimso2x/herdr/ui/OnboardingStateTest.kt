@@ -6,52 +6,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OnboardingStateTest {
-    private fun steps(s: OnboardingState) = s.rows.map { it.step }
-
-    private fun status(s: OnboardingState, step: OnboardingStep) = s.rows.single { it.step == step }.status
-
     @Test
-    fun nothingDoneListsTheThreeSettingsAndWarns() {
-        val s = OnboardingState.from(false, false, false, isSamsung = false, sdk = 34)
-        assertEquals(listOf(OnboardingStep.NOTIFICATIONS, OnboardingStep.BATTERY, OnboardingStep.AUTO_REVOKE), steps(s))
-        assertTrue(s.rows.all { it.status == StepStatus.TODO })
-        assertTrue(s.showWarning)
-    }
-
-    @Test
-    fun allDoneHasNoWarning() {
-        val s = OnboardingState.from(true, true, true, isSamsung = false, sdk = 34)
-        assertTrue(s.rows.all { it.status == StepStatus.DONE })
-        assertFalse(s.showWarning)
-    }
-
-    @Test
-    fun warningFollowsNotificationsAndBatteryOnly() {
-        assertTrue(OnboardingState.from(false, true, true, false, 34).showWarning)
-        assertTrue(OnboardingState.from(true, false, true, false, 34).showWarning)
-        assertFalse(OnboardingState.from(true, true, false, false, 34).showWarning)
-    }
-
-    @Test
-    fun samsungAddsAnInfoRowWithoutStatus() {
-        val s = OnboardingState.from(true, true, true, isSamsung = true, sdk = 34)
-        assertEquals(OnboardingStep.SAMSUNG, steps(s).last())
-        assertEquals(StepStatus.INFO, status(s, OnboardingStep.SAMSUNG))
-        assertFalse(OnboardingState.from(true, true, true, isSamsung = false, sdk = 34).rows.any { it.step == OnboardingStep.SAMSUNG })
-    }
-
-    @Test
-    fun autoRevokeRowNeedsAndroid11() {
-        assertFalse(OnboardingState.from(true, true, true, false, sdk = 29).rows.any { it.step == OnboardingStep.AUTO_REVOKE })
-        assertEquals(StepStatus.TODO, status(OnboardingState.from(true, true, false, false, sdk = 30), OnboardingStep.AUTO_REVOKE))
-    }
-
-    @Test
-    fun statusesAreIndependent() {
-        val s = OnboardingState.from(true, false, true, false, 34)
-        assertEquals(StepStatus.DONE, status(s, OnboardingStep.NOTIFICATIONS))
-        assertEquals(StepStatus.TODO, status(s, OnboardingStep.BATTERY))
-        assertEquals(StepStatus.DONE, status(s, OnboardingStep.AUTO_REVOKE))
+    fun notificationPermissionAloneControlsWarning() {
+        val denied = OnboardingState.from(false)
+        assertEquals(listOf(OnboardingRow(OnboardingStep.NOTIFICATIONS, StepStatus.TODO)), denied.rows)
+        assertTrue(denied.showWarning)
+        val allowed = OnboardingState.from(true)
+        assertEquals(listOf(OnboardingRow(OnboardingStep.NOTIFICATIONS, StepStatus.DONE)), allowed.rows)
+        assertFalse(allowed.showWarning)
     }
 
     @Test

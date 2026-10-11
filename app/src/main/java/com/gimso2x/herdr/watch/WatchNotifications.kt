@@ -9,164 +9,93 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.SystemClock
+import android.os.Bundle
 import androidx.core.app.NotificationCompat
 import com.gimso2x.herdr.MainActivity
 import com.gimso2x.herdr.R
-import com.gimso2x.herdr.SettingsActivity
-import java.util.concurrent.ConcurrentHashMap
 
 object WatchNotifications {
-    const val CHANNEL_WATCH = "herdr_watch"
     const val CHANNEL_NEEDS_INPUT = "herdr_needs_input"
     const val CHANNEL_FINISHED = "herdr_finished"
-    const val NOTIFY_WATCH = 3001
     const val NOTIFY_ALERT = 3002
+    const val EXTRA_EVENT_ID = "herdr_event_id"
+    private const val LEGACY_CHANNEL = "herdr_watch"
+    private const val LEGACY_NOTIFICATION = 3001
 
     fun ensureChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_WATCH,
-                context.getString(R.string.channel_watch),
-                NotificationManager.IMPORTANCE_LOW,
-            ),
-        )
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_NEEDS_INPUT,
-                context.getString(R.string.channel_needs_input),
-                NotificationManager.IMPORTANCE_HIGH,
-            ).apply { lockscreenVisibility = Notification.VISIBILITY_PRIVATE },
-        )
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_FINISHED,
-                context.getString(R.string.channel_finished),
-                NotificationManager.IMPORTANCE_DEFAULT,
-            ).apply { lockscreenVisibility = Notification.VISIBILITY_PRIVATE },
-        )
+        // Upgrades remove the old waiting notification/channel, without changing alert channel choices.
+        manager.cancel(LEGACY_NOTIFICATION)
+        manager.deleteNotificationChannel(LEGACY_CHANNEL)
+        manager.createNotificationChannel(NotificationChannel(CHANNEL_NEEDS_INPUT,
+            context.getString(R.string.channel_needs_input), NotificationManager.IMPORTANCE_HIGH)
+            .apply { lockscreenVisibility = Notification.VISIBILITY_PRIVATE })
+        manager.createNotificationChannel(NotificationChannel(CHANNEL_FINISHED,
+            context.getString(R.string.channel_finished), NotificationManager.IMPORTANCE_DEFAULT)
+            .apply { lockscreenVisibility = Notification.VISIBILITY_PRIVATE })
     }
 
-    fun watchNotification(context: Context, connected: Boolean): Notification {
+    /** Immediate generic private alert, without any server text or even the pane identifier. */
+    fun showPush(context: Context, event: PushEvent): Boolean {
+        if (AppForeground.isForeground() || !hasPostPermission(context)) return false
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
         ensureChannels(context)
-        val text = context.getString(if (connected) R.string.watch_waiting else R.string.watch_disconnected)
-        return NotificationCompat.Builder(context, CHANNEL_WATCH)
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle(context.getString(R.string.app_name))
-            .setContentText(text)
-            .setContentIntent(openSettings(context))
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .build()
+        manager.notify(event.paneId, NOTIFY_ALERT, notification(context, event, event.genericAlert(), false, true))
+        return true
     }
 
-    /** Posts [alerts] unless the app is visible or notifications are not permitted. */
-    fun show(context: Context, alerts: List<Alert>) {
-        if (alerts.isEmpty() || AppForeground.isForeground() || !hasPostPermission(context)) return
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        ensureChannels(context)
-        for (alert in alerts) {
-            // tag = paneId: a newer alert for the same pane replaces the older one.
-            manager.notify(alert.paneId, NOTIFY_ALERT, alertNotification(context, alert, silent = false))
-            posted[postKey(alert)] = SystemClock.elapsedRealtime()
-        }
-    }
-
-    /**
-     * Adds the detail line to an alert that is already on screen. The update is silent (no second
-     * sound or heads-up) and skipped when the user dismissed the alert, or a newer alert of another
-     * kind replaced it, in the meantime. `notify` is queued by the system, so an alert posted a moment
-     * ago may not be listed yet: it counts as on screen for [POST_SETTLE_MILLIS].
-     */
-    fun showDetail(context: Context, alert: Alert) {
+    /** Never resurrect a dismissed alert or overwrite a later event (even one of the same kind). */
+    fun showDetail(context: Context, event: PushEvent, alert: Alert) {
         if (AppForeground.isForeground() || !hasPostPermission(context)) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        val channel = channelFor(alert.kind)
-        val justPosted = posted[postKey(alert)]?.let { SystemClock.elapsedRealtime() - it < POST_SETTLE_MILLIS } == true
-        val onScreen = justPosted || manager.activeNotifications.any {
-            it.id == NOTIFY_ALERT && it.tag == alert.paneId && it.notification.channelId == channel
+        if (manager.activeNotifications.any { it.id == NOTIFY_ALERT && it.tag == event.paneId &&
+                it.notification.extras.getString(EXTRA_EVENT_ID) == event.eventId }) {
+            manager.notify(event.paneId, NOTIFY_ALERT, notification(context, event, alert, true, false))
         }
-        if (onScreen) manager.notify(alert.paneId, NOTIFY_ALERT, alertNotification(context, alert, silent = true))
     }
 
-    private const val POST_SETTLE_MILLIS = 3_000L
-
-    /** Elapsed-realtime of the last alert post per kind and pane. */
-    private val posted = ConcurrentHashMap<String, Long>()
-
-    private fun postKey(alert: Alert) = "${alert.kind}|${alert.paneId}"
-
-    private fun channelFor(kind: AlertKind): String = when (kind) {
-        AlertKind.NEEDS_INPUT -> CHANNEL_NEEDS_INPUT
-        AlertKind.FINISHED -> CHANNEL_FINISHED
+    fun clear(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        manager.cancel(LEGACY_NOTIFICATION)
+        for (notification in manager.activeNotifications) {
+            if (notification.id == NOTIFY_ALERT) manager.cancel(notification.tag, notification.id)
+        }
     }
 
-    /**
-     * The alert carries workspace/tab labels, the pane title and the agent's words, so on a locked
-     * screen it is replaced by a [publicVersion] that only says what kind of attention is needed.
-     */
-    private fun alertNotification(context: Context, alert: Alert, silent: Boolean): Notification {
-        val channel = channelFor(alert.kind)
+    private fun notification(context: Context, event: PushEvent, alert: Alert, silent: Boolean, generic: Boolean): Notification {
+        val channel = if (event.kind == AlertKind.NEEDS_INPUT) CHANNEL_NEEDS_INPUT else CHANNEL_FINISHED
         val publicVersion = NotificationCompat.Builder(context, channel)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentTitle(context.getString(R.string.app_name))
-            .setContentText(AlertText.lockScreenText(alert.kind))
-            .build()
+            .setContentText(AlertText.lockScreenText(event.kind)).build()
+        val body = if (generic) AlertText.lockScreenText(event.kind) else alert.body
         return NotificationCompat.Builder(context, channel)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
-            .setContentTitle(alert.title)
-            .setContentText(alert.body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(alert.bigText))
-            .setContentIntent(openApp(context, alert.paneId))
+            .setContentTitle(if (generic) context.getString(R.string.app_name) else alert.title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(if (generic) body else alert.bigText))
+            .setContentIntent(openApp(context, event.paneId))
             .setAutoCancel(true)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(publicVersion)
             .setOnlyAlertOnce(silent)
-            .setPriority(
-                if (alert.kind == AlertKind.NEEDS_INPUT) {
-                    NotificationCompat.PRIORITY_HIGH
-                } else {
-                    NotificationCompat.PRIORITY_DEFAULT
-                },
-            )
+            .addExtras(Bundle().apply { putString(EXTRA_EVENT_ID, event.eventId) })
+            .setPriority(if (event.kind == AlertKind.NEEDS_INPUT) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
             .build()
     }
 
     fun hasPostPermission(context: Context): Boolean =
-        context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        android.os.Build.VERSION.SDK_INT < 33 ||
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    /** The ongoing "waiting" notification opens Settings; alert notifications open the pane instead. */
-    private fun openSettings(context: Context): PendingIntent {
-        val intent = Intent(context, SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return PendingIntent.getActivity(
-            context,
-            NOTIFY_WATCH,
-            intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-    }
-
-    /**
-     * One PendingIntent per pane: the pane id is in the intent data ([PaneLink]), which
-     * `Intent.filterEquals` compares, so no two panes share a PendingIntent and FLAG_UPDATE_CURRENT
-     * can only refresh the extras of the same pane. The extra stays the contract with MainActivity.
-     */
-    private fun openApp(context: Context, paneId: String?): PendingIntent {
+    /** Exact pane identity is part of Intent.filterEquals, so unrelated panes never share extras. */
+    private fun openApp(context: Context, paneId: String): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (paneId != null) {
-                data = Uri.parse(PaneLink.uri(paneId))
-                putExtra(MainActivity.EXTRA_PANE_ID, paneId)
-            }
+            data = Uri.parse(PaneLink.uri(paneId))
+            putExtra(MainActivity.EXTRA_PANE_ID, paneId)
         }
-        return PendingIntent.getActivity(
-            context,
-            NOTIFY_ALERT,
-            intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
+        return PendingIntent.getActivity(context, NOTIFY_ALERT, intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 }
