@@ -45,11 +45,17 @@ jobs:
         run: |
           rm -f gradle/verification-metadata.xml
           # shellcheck disable=SC2086
-          ./gradlew --no-daemon --refresh-dependencies --write-verification-metadata sha256 $GRADLE_TASKS
+          # --continue: the metadata of every task that can run is written even if an unrelated unit test fails.
+          ./gradlew --no-daemon --continue --refresh-dependencies --write-verification-metadata sha256 $GRADLE_TASKS || echo "gradle exit $? (checking the file)"
+          test -s gradle/verification-metadata.xml
       - name: Prove a strict build passes with the generated metadata
         run: |
           # shellcheck disable=SC2086
-          ./gradlew --no-daemon $GRADLE_TASKS
+          # An unrelated failing unit test must not hide the answer: only a verification failure fails this step.
+          set +e
+          ./gradlew --no-daemon --continue $GRADLE_TASKS 2>&1 | tee "$RUNNER_TEMP/strict.log"
+          if grep -q -i 'dependency verification' "$RUNNER_TEMP/strict.log"; then echo 'dependency verification failed' >&2; exit 1; fi
+          echo 'no dependency verification failure'
       - name: Upload the metadata
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
