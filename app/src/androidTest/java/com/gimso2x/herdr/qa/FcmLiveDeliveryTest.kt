@@ -33,7 +33,7 @@ import org.junit.runner.RunWith
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/** Dedicated google_apis device phase, never included in the ordinary AOSP fixture suite. */
+/** Dedicated Google Play device phase, never included in the ordinary AOSP fixture suite. */
 @RunWith(AndroidJUnit4::class)
 class FcmLiveDeliveryTest {
     @get:Rule val grant: GrantPermissionRule = GrantPermissionRule.grant(Manifest.permission.POST_NOTIFICATIONS)
