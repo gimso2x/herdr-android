@@ -140,3 +140,11 @@ class AlertDetailTest {
         assertNull(AlertDetail.fromConversation("[]"))
     }
 }
+
+class AlertLockScreenTextTest {
+    @Test
+    fun lockScreenShowsOnlyTheKindOfAttention() {
+        assertEquals("입력이 필요합니다", AlertText.lockScreenText(AlertKind.NEEDS_INPUT))
+        assertEquals("작업을 마쳤습니다", AlertText.lockScreenText(AlertKind.FINISHED))
+    }
+}

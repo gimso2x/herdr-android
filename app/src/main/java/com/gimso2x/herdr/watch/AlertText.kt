@@ -20,6 +20,10 @@ object AlertText {
 
     data class Text(val title: String, val body: String, val bigText: String)
 
+    /** What a locked screen shows instead of the alert: the kind of attention needed, nothing from the pane. */
+    fun lockScreenText(kind: AlertKind): String =
+        if (kind == AlertKind.NEEDS_INPUT) BODY_NEEDS_INPUT else BODY_FINISHED
+
     fun format(kind: AlertKind, sample: PaneSample, detail: String?): Text =
         format(kind, sample.paneId, sample.workspace, sample.tab, sample.agent, sample.title, detail)
 

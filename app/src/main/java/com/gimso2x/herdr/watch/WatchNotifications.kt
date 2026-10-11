@@ -8,10 +8,11 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import androidx.core.app.NotificationCompat
 import com.gimso2x.herdr.MainActivity
-import com.gimso2x.herdr.SettingsActivity
 import com.gimso2x.herdr.R
+import com.gimso2x.herdr.SettingsActivity
 
 object WatchNotifications {
     const val CHANNEL_WATCH = "herdr_watch"
@@ -34,14 +35,14 @@ object WatchNotifications {
                 CHANNEL_NEEDS_INPUT,
                 context.getString(R.string.channel_needs_input),
                 NotificationManager.IMPORTANCE_HIGH,
-            ),
+            ).apply { lockscreenVisibility = Notification.VISIBILITY_PRIVATE },
         )
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_FINISHED,
                 context.getString(R.string.channel_finished),
                 NotificationManager.IMPORTANCE_DEFAULT,
-            ),
+            ).apply { lockscreenVisibility = Notification.VISIBILITY_PRIVATE },
         )
     }
 
@@ -66,28 +67,60 @@ object WatchNotifications {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         ensureChannels(context)
         for (alert in alerts) {
-            val channel = when (alert.kind) {
-                AlertKind.NEEDS_INPUT -> CHANNEL_NEEDS_INPUT
-                AlertKind.FINISHED -> CHANNEL_FINISHED
-            }
-            val notification = NotificationCompat.Builder(context, channel)
-                .setSmallIcon(android.R.drawable.stat_notify_chat)
-                .setContentTitle(alert.title)
-                .setContentText(alert.body)
-                .setStyle(NotificationCompat.BigTextStyle().bigText(alert.bigText))
-                .setContentIntent(openApp(context, alert.paneId))
-                .setAutoCancel(true)
-                .setPriority(
-                    if (alert.kind == AlertKind.NEEDS_INPUT) {
-                        NotificationCompat.PRIORITY_HIGH
-                    } else {
-                        NotificationCompat.PRIORITY_DEFAULT
-                    },
-                )
-                .build()
             // tag = paneId: a newer alert for the same pane replaces the older one.
-            manager.notify(alert.paneId, NOTIFY_ALERT, notification)
+            manager.notify(alert.paneId, NOTIFY_ALERT, alertNotification(context, alert, silent = false))
         }
+    }
+
+    /**
+     * Adds the detail line to an alert that is already on screen. The update is silent (no second
+     * sound or heads-up) and skipped when the user dismissed the alert, or a newer alert of another
+     * kind replaced it, in the meantime.
+     */
+    fun showDetail(context: Context, alert: Alert) {
+        if (AppForeground.isForeground() || !hasPostPermission(context)) return
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        val channel = channelFor(alert.kind)
+        val onScreen = manager.activeNotifications.any {
+            it.id == NOTIFY_ALERT && it.tag == alert.paneId && it.notification.channelId == channel
+        }
+        if (onScreen) manager.notify(alert.paneId, NOTIFY_ALERT, alertNotification(context, alert, silent = true))
+    }
+
+    private fun channelFor(kind: AlertKind): String = when (kind) {
+        AlertKind.NEEDS_INPUT -> CHANNEL_NEEDS_INPUT
+        AlertKind.FINISHED -> CHANNEL_FINISHED
+    }
+
+    /**
+     * The alert carries workspace/tab labels, the pane title and the agent's words, so on a locked
+     * screen it is replaced by a [publicVersion] that only says what kind of attention is needed.
+     */
+    private fun alertNotification(context: Context, alert: Alert, silent: Boolean): Notification {
+        val channel = channelFor(alert.kind)
+        val publicVersion = NotificationCompat.Builder(context, channel)
+            .setSmallIcon(android.R.drawable.stat_notify_chat)
+            .setContentTitle(context.getString(R.string.app_name))
+            .setContentText(AlertText.lockScreenText(alert.kind))
+            .build()
+        return NotificationCompat.Builder(context, channel)
+            .setSmallIcon(android.R.drawable.stat_notify_chat)
+            .setContentTitle(alert.title)
+            .setContentText(alert.body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(alert.bigText))
+            .setContentIntent(openApp(context, alert.paneId))
+            .setAutoCancel(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(publicVersion)
+            .setOnlyAlertOnce(silent)
+            .setPriority(
+                if (alert.kind == AlertKind.NEEDS_INPUT) {
+                    NotificationCompat.PRIORITY_HIGH
+                } else {
+                    NotificationCompat.PRIORITY_DEFAULT
+                },
+            )
+            .build()
     }
 
     fun hasPostPermission(context: Context): Boolean =
@@ -104,14 +137,22 @@ object WatchNotifications {
         )
     }
 
+    /**
+     * One PendingIntent per pane: the pane id is in the intent data ([PaneLink]), which
+     * `Intent.filterEquals` compares, so no two panes share a PendingIntent and FLAG_UPDATE_CURRENT
+     * can only refresh the extras of the same pane. The extra stays the contract with MainActivity.
+     */
     private fun openApp(context: Context, paneId: String?): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (paneId != null) putExtra(MainActivity.EXTRA_PANE_ID, paneId)
+            if (paneId != null) {
+                data = Uri.parse(PaneLink.uri(paneId))
+                putExtra(MainActivity.EXTRA_PANE_ID, paneId)
+            }
         }
         return PendingIntent.getActivity(
             context,
-            paneId.hashCode(),
+            NOTIFY_ALERT,
             intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
