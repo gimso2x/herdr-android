@@ -27,10 +27,11 @@ PHASE_TIMEOUT=480
 
 mkdir -p "$OUT"
 MEM_LOG="$(mktemp)"
-# Light host sampler (every 10 s, killed with the script): shows whether the host ran out of memory.
+# Light host sampler (every 2 s, killed with the script): shows whether the host ran out of memory and
+# when the emulator process (qemu=count of qemu-system processes, RSS KB) disappeared.
 ( while true; do
-    echo "$(date +%T) $(free -m | awk 'NR==2{print "used=" $3 " avail=" $7}') qemuRSS=$(ps -o rss= -C qemu-system-x86_64 | tr '\n' ' ')"
-    sleep 10
+    echo "$(date +%T) $(free -m | awk 'NR==2{print "used=" $3 " avail=" $7}') qemu=$(pgrep -fc qemu-system) qemuRSS=$(ps -o rss= -C qemu-system-x86_64 -C qemu-system-x86_64-headless | tr '\n' ' ')"
+    sleep 2
   done ) >"$MEM_LOG" 2>&1 &
 SAMPLER=$!
 EV_LOG=/dev/null
@@ -135,10 +136,18 @@ hang_diagnostics() {
 # Host-side facts for a vanished emulator (job log only: process names, sizes and kernel kill lines).
 emulator_death_facts() {
   echo "--- emulator death facts"
-  echo "host memory samples (time used/avail MB, qemu RSS KB), last 12:"
-  tail -n 12 "$MEM_LOG" 2>/dev/null
+  echo "host memory samples (time used/avail MB, qemu process count, RSS KB): last 6 with the emulator alive, then the minimum avail of the run:"
+  grep -E ' qemu=[1-9]' "$MEM_LOG" 2>/dev/null | tail -n 6
+  awk '{ split($3, a, "="); if (min == "" || a[2] + 0 < min) min = a[2] + 0 } END { print "min avail MB over the run: " min }' "$MEM_LOG" 2>/dev/null
   free -m | sed -n 1,3p
-  { sudo -n dmesg 2>/dev/null || dmesg 2>/dev/null; } | grep -iE "out of memory|oom-kill|killed process|qemu|segfault|general protection" | tail -n 8 | cut -c1-200
+  local dm cg f
+  dm=$(sudo -n dmesg 2>&1 | tail -n 600)
+  echo "dmesg readable lines: $(wc -l <<<"$dm"); kill/crash lines:"
+  grep -iE "out of memory|oom|killed process|qemu|emulator|segfault|general protection|invalid opcode|trap" <<<"$dm" | tail -n 8 | cut -c1-200
+  cg="/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup | head -n 1)"
+  for f in memory.max memory.peak memory.events; do echo "cgroup $f: $(tr '\n' ' ' <"$cg/$f" 2>/dev/null)"; done
+  echo "strace (signals and exit status of the emulator only, QA_STRACE runs):"
+  grep -E '\+\+\+|--- SIG' "$STRACE_LOG" 2>/dev/null | tail -n 8 | cut -c1-200
   ls -1 /tmp/android-runner 2>/dev/null | head -n 5
   echo "emulator stderr/-verbose log, last 40 lines (host process output, 200 cols; empty without -verbose redirect):"
   tail -n 40 "$EMULATOR_LOG" 2>/dev/null | cut -c1-200
@@ -154,10 +163,14 @@ emulator_death_facts() {
 }
 
 # Render probe counts (P0/P1) from the host-side stream: they survive an emulator death.
+PROBE_SEEN=0
 print_probe_lines() {
+  local total
   sleep 2
+  total=$(wc -l <"$PROBE_LOG")
   echo "--- render probe counts (canvases, contexts, image pixels, websocket bytes; no page content)"
-  cut -c1-900 "$PROBE_LOG" 2>/dev/null | tail -n 24
+  tail -n +$((PROBE_SEEN + 1)) "$PROBE_LOG" 2>/dev/null | cut -c1-900
+  PROBE_SEEN=$total
   echo "--- end render probe counts"
 }
 
@@ -407,6 +420,17 @@ fi
 EV_LOG="$(mktemp)"
 adb logcat -b events,crash -v time >"$EV_LOG" 2>&1 &
 EV_PID=$!
+STRACE_LOG=/tmp/qemu-strace.log
+if [ -n "${QA_STRACE:-}" ]; then
+  # Debug only: say how the emulator process ends (killed by which signal, or exited with which status).
+  qpid=$(pgrep -fn qemu-system-x86_64 || true)
+  if [ -n "$qpid" ]; then
+    sudo -n strace -f -p "$qpid" -e trace=none -e signal=SIGSEGV,SIGABRT,SIGBUS,SIGILL,SIGFPE,SIGTERM,SIGKILL,SIGHUP,SIGINT,SIGQUIT,SIGPIPE,SIGSYS -o "$STRACE_LOG" >/dev/null 2>&1 &
+    echo "strace attached to emulator pid $qpid"
+  else
+    echo "strace: no emulator pid found"
+  fi
+fi
 PROBE_LOG="$(mktemp)"
 adb logcat -s RenderProbe -v raw >"$PROBE_LOG" 2>&1 &
 PROBE_PID=$!
@@ -424,6 +448,13 @@ if [ -z "${QA_PHASES:-}" ] || [[ " $QA_PHASES " == *" Warmup "* ]]; then run_pha
 for g in $PROBE_GROUPS $FULL_ORDER; do
   if selected "$g"; then group "$g"; fi
 done
+
+# A debug run can end on the dying phase: report how the emulator went away.
+if [ "$(timeout 30 adb get-state 2>/dev/null | tr -d '\r\n')" != "device" ]; then
+  echo "FATAL: the emulator is gone at the end of the run"
+  emulator_death_facts
+  FAILED+=("emulator lost during the run")
+fi
 
 # --- verification of the collected evidence --------------------------------------------------
 
