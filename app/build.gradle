@@ -51,10 +51,11 @@ android {
     buildTypes {
         debug {
             debuggable true
-            // Same stable key as release so debug and release builds replace each other; without
-            // release signing properties (CI emulator job, forks) fall back to the default debug
-            // key, otherwise AGP creates no installDebug/installDebugAndroidTest tasks at all.
-            signingConfig signingConfigs.findByName('release') ?: signingConfigs.getByName('debug')
+            // A distinct package (com.gimso2x.herdr.debug) and the throwaway Android debug key (AGP's default
+            // debug signing config, never the release key): a debug APK, which is debuggable and carries the QA
+            // seams, can neither replace nor upgrade the production install, on a phone or from a CI artifact.
+            applicationIdSuffix '.debug'
+            signingConfig signingConfigs.getByName('debug')
         }
         release {
             signingConfig signingConfigs.findByName('release')

@@ -1,0 +1,8 @@
+{
+  "name": "herdr-ci-diag",
+  "private": true,
+  "description": "Headless Chrome metrics for the terminal diagnostics workflow (installed with npm ci --ignore-scripts)",
+  "dependencies": {
+    "puppeteer-core": "23.11.1"
+  }
+}

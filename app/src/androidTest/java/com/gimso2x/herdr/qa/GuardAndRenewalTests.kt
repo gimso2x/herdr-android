@@ -61,6 +61,10 @@ class G1GuardFixtureTest {
             MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     frames.add(text)
+                    if (JSONObject(text).optString("type") == "role") {
+                        webSocket.send("""{"type":"role-ack","mode":"observe"}""")
+                        webSocket.send("""{"type":"snapshot","snapshot":{}}""")
+                    }
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = Unit
@@ -84,6 +88,13 @@ class G1GuardFixtureTest {
                 assertEquals(0, fx.count("/x"))
                 assertEquals(2L, (Qa.js("window.__qaDropped") as Number).toLong())
                 assertEquals(1L, (Qa.js("window.__qaBlocked") as Number).toLong())
+                // Server -> client frames are counted by type only: the fixture answers the role frame with a
+                // role-ack and a snapshot, and the guard must have counted exactly those two (no payload kept).
+                Qa.awaitJs(
+                    "incoming frame types counted",
+                    30_000,
+                    "window.__qaIncoming === 2 && window.__qaIncomingTypes['role-ack'] === 1 && window.__qaIncomingTypes['snapshot'] === 1",
+                )
             }
         } finally {
             fx.stop()

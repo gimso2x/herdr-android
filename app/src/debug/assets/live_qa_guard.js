@@ -47,6 +47,44 @@
     };
   }
 
+  // Incoming frames: count server frame types only (never payloads, ids or labels), so a test can tell that
+  // the socket really delivered a snapshot / role-ack and not merely that the client opened it.
+  window.__qaIncoming = 0;
+  window.__qaIncomingTypes = {};
+  var TYPE_SHAPE = /^[a-z][a-z0-9-]{0,31}$/;
+  var TYPE_HEAD = /^\s*\{\s*"type"\s*:\s*"([^"\\]{1,32})"/;
+
+  function incomingType(data) {
+    if (typeof data !== 'string') return 'binary';
+    var m = TYPE_HEAD.exec(data.length > 256 ? data.slice(0, 256) : data);
+    var type = m ? m[1] : undefined;
+    if (type === undefined && data.length <= 65536) {
+      try {
+        var frame = JSON.parse(data);
+        if (frame && typeof frame === 'object' && typeof frame.type === 'string') type = frame.type;
+      } catch (e) { /* counted as other */ }
+    }
+    return type !== undefined && TYPE_SHAPE.test(type) ? type : 'other';
+  }
+
+  function countIncoming(event) {
+    var key = incomingType(event && event.data);
+    window.__qaIncoming += 1;
+    window.__qaIncomingTypes[key] = (window.__qaIncomingTypes[key] || 0) + 1;
+  }
+
+  var NativeWebSocket = window.WebSocket;
+  if (NativeWebSocket) {
+    var CountingWebSocket = function (url, protocols) {
+      var ws = protocols === undefined ? new NativeWebSocket(url) : new NativeWebSocket(url, protocols);
+      ws.addEventListener('message', countIncoming);
+      return ws;
+    };
+    CountingWebSocket.prototype = NativeWebSocket.prototype;
+    ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'].forEach(function (k) { CountingWebSocket[k] = NativeWebSocket[k]; });
+    window.WebSocket = CountingWebSocket;
+  }
+
   function methodAllowed(method) {
     var m = String(method || 'GET').toUpperCase();
     return m === 'GET' || m === 'HEAD';

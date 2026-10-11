@@ -20,10 +20,10 @@
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
 
+# OkHttp 4 and Okio ship their own consumer rules (incl. -adaptresourcefilenames for the public suffix list), so
+# no blanket keep rules here: R8 shrinks and obfuscates them like the rest of the app.
 -dontwarn okhttp3.**
 -dontwarn okio.**
--keep class okhttp3.** { *; }
--keep class okio.** { *; }
 
 # security-crypto pulls in Tink, which references compile-time-only errorprone annotations.
 -dontwarn com.google.errorprone.annotations.**

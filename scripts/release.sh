@@ -11,6 +11,12 @@ TAG="v$VERSION"
 cd "$(dirname "$0")/.."
 
 # Guards run BEFORE anything is edited.
+# The release commit is pushed to origin main, so it must be made on main, on top of origin/main.
+branch=$(git rev-parse --abbrev-ref HEAD) || { echo "error: cannot read the current branch" >&2; exit 1; }
+if [ "$branch" != "main" ]; then
+  echo "error: run from main (on '$branch'); the release commit is pushed to origin main" >&2
+  exit 1
+fi
 if [ -n "$(git status --porcelain)" ]; then
   echo "error: uncommitted changes; commit or remove them first" >&2
   exit 1
@@ -24,19 +30,34 @@ if [ -n "$remote_tags" ]; then
   echo "error: tag exists on origin: $TAG" >&2
   exit 1
 fi
+# The push must be a fast-forward of origin/main: HEAD has to contain everything origin/main has.
+git fetch -q origin main || { echo "error: cannot fetch origin main" >&2; exit 1; }
+if ! git merge-base --is-ancestor origin/main HEAD; then
+  echo "error: main does not contain origin/main (pull or rebase first); refusing to release" >&2
+  exit 1
+fi
 
 GRADLE=app/build.gradle
 code=$(sed -n -E 's/^[[:space:]]*versionCode[[:space:]]+([0-9]+)[[:space:]]*$/\1/p' "$GRADLE")
 [[ "$code" =~ ^[0-9]+$ ]] || { echo "error: cannot read versionCode from $GRADLE" >&2; exit 1; }
+BASE=$(git rev-parse HEAD)
 sed -i -E \
   -e "s/^([[:space:]]*versionCode[[:space:]]+)[0-9]+/\1$((code + 1))/" \
   -e "s/^([[:space:]]*versionName[[:space:]]+)\"[^\"]*\"/\1\"$VERSION\"/" \
   "$GRADLE"
-git add "$GRADLE"
-git commit -q -m "chore(release): $VERSION"
+# Commit, tag and push the commit and the tag together (atomic: both land or neither). Anything failing from here
+# on takes the local release commit and tag back, so a retry is never blocked by a dangling tag.
+rollback() {
+  echo "error: release failed before it was published; rolling back the local release commit and tag" >&2
+  git tag -d "$TAG" >/dev/null 2>&1 || true
+  git reset -q --hard "$BASE" || echo "error: could not reset to $BASE; reset by hand" >&2
+}
+if ! { git add "$GRADLE" && git commit -q -m "chore(release): $VERSION" && git tag -a "$TAG" -m "$TAG" \
+  && git push --atomic origin main "refs/tags/$TAG"; }; then
+  rollback
+  exit 1
+fi
 SHA=$(git rev-parse HEAD)
-git tag -a "$TAG" -m "$TAG"
-git push --follow-tags origin main
 echo "released commit $SHA as $TAG (versionCode $((code + 1)))"
 
 # Run discovery (not a status poll): at most 12 lookups, 10 s apart, for the tag's own run.

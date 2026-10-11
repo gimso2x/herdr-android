@@ -5,7 +5,7 @@
         <!-- Serves the C1 fixture PNG to the app's WebView file chooser (see QaFileProvider). -->
         <provider
             android:name="com.gimso2x.herdr.qa.QaFileProvider"
-            android:authorities="com.gimso2x.herdr.test.fileprovider"
+            android:authorities="${applicationId}.fileprovider"
             android:exported="true" />
     </application>
 </manifest>

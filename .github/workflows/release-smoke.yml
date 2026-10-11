@@ -19,8 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: android-actions/setup-android@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
         with:
           packages: platform-tools
       - name: Download the release APK
@@ -42,7 +42,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq pulseaudio
       - name: Smoke the release APK on the emulator
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         env:
           BASE_URL: ${{ secrets.HERDR_BASE_URL }}
           CF_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_CI }}
@@ -68,17 +68,10 @@ jobs:
           CF_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_CI }}
           CF_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET_CI }}
         run: |
-          test -n "$CF_ID" && test -n "$CF_SECRET" && test -n "$BASE_URL" || { echo 'scan secrets are missing' >&2; exit 1; }
-          BASE_HOST=${BASE_URL#https://}
-          files=0
-          if [ -d release-smoke ]; then
-            files=$( { grep -r -l -F -e "$CF_SECRET" -e "$CF_ID" -e "$BASE_HOST" release-smoke 2>/dev/null || true; } | wc -l)
-          fi
-          echo "secret-scan files=$files"
-          test "$files" -eq 0
+          ci/secret-scan.sh release-smoke
       - name: Upload smoke artifacts
         if: always() && steps.scan.outcome == 'success'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-smoke${{ inputs.bad_token && '-bad' || '' }}
           path: release-smoke/

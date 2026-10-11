@@ -12,8 +12,10 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-PKG=com.gimso2x.herdr
-RUNNER=com.gimso2x.herdr.test/androidx.test.runner.AndroidJUnitRunner
+# shellcheck source=ci/qa-lib.sh
+source ci/qa-lib.sh
+PKG=$QA_PKG
+RUNNER=$QA_RUNNER
 TOKEN_FILE="${RUNNER_TEMP:?RUNNER_TEMP is required}/qa-token.json"
 DEVICE_TOKEN=/data/local/tmp/qa-token.json
 TMP=$(mktemp -d)
@@ -38,10 +40,18 @@ webview=$(adb shell dumpsys webviewupdate 2>/dev/null | tr -d '\r' | grep -E 'Cu
 echo "webview: $webview"
 
 adb logcat -c
-timeout 900 adb shell am instrument -w -r -e class com.gimso2x.herdr.qa.TerminalDiagTest "$RUNNER" >"$TMP/instr.txt" 2>&1
+timeout 900 adb shell am instrument -w -r -e class "$QA_TEST_PKG.TerminalDiagTest" "$RUNNER" >"$TMP/instr.txt" 2>&1
 status=$?
 echo "=== TermDiag metrics (WebView, live, narrowed guard) ==="
 adb logcat -d -s TermDiag:I | grep -v '^---' | sed -E 's/^[0-9-]+ [0-9:.]+ +[0-9]+ +[0-9]+ I TermDiag: //'
 echo "=== instrumentation result (exit $status) ==="
 grep -E '^OK \(|FAILURES|INSTRUMENTATION_RESULT|Error|AssertionError|Exception' "$TMP/instr.txt" | cut -c1-300 | sed -n 1,20p
-grep -q '^OK (' "$TMP/instr.txt" && ! grep -q 'FAILURES!!!' "$TMP/instr.txt"
+# Same acceptance rule as ci/instrumented.sh: successful runner exit and exactly the expected positive test count.
+expected=$(qa_expected_counts "$QA_TEST_SRC" | awk '$1 == "TerminalDiagTest" { print $2 }')
+[ -n "$expected" ] || { echo "FAIL: no @Test count found for TerminalDiagTest"; exit 1; }
+if reason=$(qa_check_phase TerminalDiagTest "$TMP/instr.txt" "$status" "$expected"); then
+  echo "TerminalDiagTest: OK ($(qa_executed_count "$TMP/instr.txt") tests executed)"
+else
+  echo "FAIL: TerminalDiagTest did not pass: $reason"
+  exit 1
+fi

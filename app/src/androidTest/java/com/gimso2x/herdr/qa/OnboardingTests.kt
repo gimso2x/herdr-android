@@ -39,7 +39,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-private const val PKG = "com.gimso2x.herdr"
+private val PKG: String get() = Qa.PKG
 
 // What ActivityResultContracts.RequestPermission launches today (androidx.activity 1.11): the platform action.
 private const val ACTION_REQUEST_PERMISSIONS = "android.content.pm.action.REQUEST_PERMISSIONS"

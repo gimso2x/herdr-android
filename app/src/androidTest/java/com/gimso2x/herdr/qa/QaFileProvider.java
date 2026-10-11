@@ -21,7 +21,8 @@ import java.io.IOException;
  * the app and cannot write into the test package's data dir.
  */
 public class QaFileProvider extends ContentProvider {
-    public static final String AUTHORITY = "com.gimso2x.herdr.test.fileprovider";
+    /** Authority suffix; the full authority is the test package name + this (androidTest manifest). */
+    public static final String AUTHORITY_SUFFIX = ".fileprovider";
     public static final String NAME = "qa.png";
     /** A real 1x1 PNG. */
     public static final String PNG_B64 =

@@ -43,7 +43,8 @@ class FakeClock(@Volatile var now: Long = System.currentTimeMillis()) : Clock {
  * for a fixed time.
  */
 object Qa {
-    const val PKG = "com.gimso2x.herdr"
+    /** The package under test: the debug build is installed as <applicationId>.debug. */
+    val PKG: String get() = targetContext.packageName
     /** An arbitrary https origin for cookie-only scenarios (nothing is contacted). */
     const val SAMPLE = "https://herdr.example.com"
 

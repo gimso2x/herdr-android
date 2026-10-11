@@ -20,9 +20,10 @@ declare -gA QA_CLASSES=(
   [O2]="O2PermissionRequestTest"
   [U1]="U1UpgradePathTest U2SettingsChangeTest"
   [Sstore]="SStoreWriteTest SStoreReadTest" [Scookie]="SCookieWipeTest"
+  [S]="S1MainFrameRetryTest S2PendingPaneSetupTest S3ServerChangeRecoveryTest S4DownloadNamesTest S4DownloadRedirectTest S5SignOutWipeTest S6AlertSwitchSemanticsTest"
   [P0]="P0RenderProbeFixtureTest" [P1]="P1RenderProbeLiveTest"
 )
-QA_FULL_ORDER="L1 L2 L3 L4 G1 A1 A2 F1 F2 F3 F4 F5 F6 C1 C2 C3 C4 C5 R1 W1 W2 W3 W4 O1 O2 U1 Sstore Scookie"
+QA_FULL_ORDER="L1 L2 L3 L4 G1 A1 A2 F1 F2 F3 F4 F5 F6 C1 C2 C3 C4 C5 R1 W1 W2 W3 W4 O1 O2 U1 Sstore Scookie S"
 QA_SUBSET_ORDER="F5 F6 W1 W2 W3 W4 O1 U1"
 # The single classification of "runs against the owner's live herdr": phase selection (fast tier drops them)
 # and evidence collection (nothing of them is ever collected or uploaded) both read this list.
@@ -116,7 +117,8 @@ qa_validate_dispatch() {
   echo "gpus=$gpus"
   echo "emu_build=$emu"
   echo "verbose=$verbose"
-  echo "phases=$(qa_normalize_phases)"
+  # Phases only exist (and are only validated) for a full run; never emit unvalidated text as an output.
+  if [ "${TIER:-full}" = "full" ]; then echo "phases=$(qa_normalize_phases)"; else echo "phases="; fi
 }
 
 # Source-derived expected test count per class ("<Class> <n>" lines): the @Test methods of every top-level

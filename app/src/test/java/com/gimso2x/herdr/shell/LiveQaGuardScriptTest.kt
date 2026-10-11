@@ -47,6 +47,17 @@ class LiveQaGuardScriptTest {
     }
 
     @Test
+    fun scriptCountsIncomingFrameTypesWithoutKeepingPayloads() {
+        assertTrue(script.contains("window.__qaIncomingTypes"))
+        assertTrue(script.contains("addEventListener('message', countIncoming)"))
+        // The counter records only a validated type name; the event data is never stored.
+        val counter = script.substringAfter("function countIncoming").substringBefore("var NativeWebSocket")
+        assertFalse(counter.contains("window.__qaLast"))
+        assertTrue(Regex("""window\.__qaIncomingTypes\[key]""").containsMatchIn(counter))
+        assertFalse(Regex("""__qaIncoming\w*\s*(\[[^\]]*])?\s*=\s*[^;]*event""").containsMatchIn(counter))
+    }
+
+    @Test
     fun scriptIsOnlyInTheDebugSourceSet() {
         assertTrue(File(srcDir, "debug/assets/live_qa_guard.js").isFile)
         for (set in listOf("main", "release")) {

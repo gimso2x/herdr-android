@@ -76,6 +76,11 @@ class L1LiveLoadTest {
             Qa.until(20_000, "guard saw a role frame rewritten to observe", { "rewritten=${Qa.js("window.__qaRoleRewritten")}" }) {
                 (Qa.js("window.__qaRoleRewritten") as? Number)?.toLong()?.let { it >= 1 } == true
             }
+            // The outgoing role frame only proves the client tried. The socket must also have delivered a server
+            // snapshot or role acknowledgement (frame-type counts only, no payloads).
+            Qa.until(30_000, "an incoming snapshot or role-ack frame", { "incomingTypes=${Qa.js("JSON.stringify(window.__qaIncomingTypes)")}" }) {
+                Qa.js("((window.__qaIncomingTypes['snapshot'] || 0) + (window.__qaIncomingTypes['role-ack'] || 0)) >= 1") == true
+            }
 
             // Open the workspace list drawer with a real tap (a client-side toggle, nothing is
             // sent), unless the page already shows it open (a tap would close it), then wait for

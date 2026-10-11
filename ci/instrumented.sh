@@ -208,34 +208,43 @@ run_phase() {
     timeout 20 adb devices | tee -a "$out"
     hang_diagnostics "$cls"
   fi
-  # Facts the tests log on purpose (tag QaFail), kept for passing phases too.
-  timeout 60 adb logcat -d -s QaFail 2>/dev/null | grep -v '^---' >"$OUT/$cls-facts.txt" || true
-  [ -s "$OUT/$cls-facts.txt" ] || rm -f "$OUT/$cls-facts.txt"
-  if grep -q '^OK (' "$out" && ! grep -q 'FAILURES!!!' "$out"; then
-    echo "=== phase $cls: OK"
+  local live=0 expected reason
+  qa_is_live_class "$cls" && live=1
+  # Facts the tests log on purpose (tag QaFail), kept for passing fixture phases too. Never for a live class:
+  # they carry page URLs and view state of the owner's server.
+  if [ "$live" -eq 0 ]; then
+    timeout 60 adb logcat -d -s QaFail 2>/dev/null | grep -v '^---' >"$OUT/$cls-facts.txt" || true
+    [ -s "$OUT/$cls-facts.txt" ] || rm -f "$OUT/$cls-facts.txt"
+  fi
+  expected=$(expected_count "$cls")
+  if [ -z "$expected" ]; then
+    fail "phase $cls: no @Test count found in $QA_TEST_SRC (class missing from the instrumented sources)"
+  elif reason=$(qa_check_phase "$cls" "$out" "$rc" "$expected"); then
+    echo "=== phase $cls: OK ($(qa_executed_count "$out") tests executed)"
+    OKCLS+=("$cls")
     case "$cls" in P*) print_probe_lines ;; esac
   else
-    fail "phase $cls did not report OK"
+    fail "phase $cls did not pass: $reason"
     case "$cls" in P*) print_probe_lines ;; esac
-    case "$cls" in
-      L*) ;;
-      *)
-        # Not a live phase: window focus, display and rotation settings and a screenshot are safe to keep.
-        echo "--- device state after $cls"
-        timeout 30 adb shell dumpsys window 2>/dev/null | tr -d '\r' | grep -E "mCurrentFocus|mFocusedApp|mInputMethodWindow|isKeyguardShowing|mShowingDream" | cut -c1-200 | head -n 6
-        timeout 20 adb shell wm size 2>/dev/null | tr -d '\r'
-        timeout 20 adb shell wm density 2>/dev/null | tr -d '\r'
-        echo "rotation: user=$(timeout 20 adb shell settings get system user_rotation 2>/dev/null | tr -d '\r') auto=$(timeout 20 adb shell settings get system accelerometer_rotation 2>/dev/null | tr -d '\r') font=$(timeout 20 adb shell settings get system font_scale 2>/dev/null | tr -d '\r')"
-        timeout 20 adb shell mkdir -p /sdcard/Download/qa >/dev/null 2>&1 || true
-        timeout 30 adb shell dumpsys activity activities 2>/dev/null | tr -d '\r' | grep -E "topResumedActivity|mResumedActivity" | cut -c1-200 | head -n 3
-        timeout 30 adb shell screencap -p "/sdcard/Download/qa/$cls-device.png" >/dev/null 2>&1 || true
-        echo "--- end device state"
-        ;;
-    esac
-    # Crash/diagnostic lines of the failed phase only: app tags, crashes, test failure facts.
-    timeout 60 adb logcat -d -s QaFail HerdrWatch HerdrBoot HerdrDownload AndroidRuntime:E >"$OUT/$cls-log.txt" 2>&1 || true
-    timeout 60 adb logcat -d -b all -t 600 '*:W' >"$OUT/$cls-log-all.txt" 2>&1 || true
-    timeout 60 adb logcat -d -b events -s am_kill am_crash am_proc_died am_anr am_low_memory >"$OUT/$cls-events.txt" 2>&1 || true
+    if [ "$live" -eq 0 ]; then
+      # Not a live phase: window focus, display and rotation settings and a screenshot are safe to keep.
+      echo "--- device state after $cls"
+      timeout 30 adb shell dumpsys window 2>/dev/null | tr -d '\r' | grep -E "mCurrentFocus|mFocusedApp|mInputMethodWindow|isKeyguardShowing|mShowingDream" | cut -c1-200 | head -n 6
+      timeout 20 adb shell wm size 2>/dev/null | tr -d '\r'
+      timeout 20 adb shell wm density 2>/dev/null | tr -d '\r'
+      echo "rotation: user=$(timeout 20 adb shell settings get system user_rotation 2>/dev/null | tr -d '\r') auto=$(timeout 20 adb shell settings get system accelerometer_rotation 2>/dev/null | tr -d '\r') font=$(timeout 20 adb shell settings get system font_scale 2>/dev/null | tr -d '\r')"
+      timeout 20 adb shell mkdir -p "$QA_DEVICE_OUT" >/dev/null 2>&1 || true
+      timeout 30 adb shell dumpsys activity activities 2>/dev/null | tr -d '\r' | grep -E "topResumedActivity|mResumedActivity" | cut -c1-200 | head -n 3
+      timeout 30 adb shell screencap -p "$QA_DEVICE_OUT/$cls-device.png" >/dev/null 2>&1 || true
+      echo "--- end device state"
+      # Crash/diagnostic lines of the failed phase only: app tags, crashes, test failure facts. The all-buffer
+      # dump leaves out the WebView's own tags (chromium, cr_*): page console output is page content.
+      timeout 60 adb logcat -d -s QaFail HerdrWatch HerdrBoot HerdrDownload AndroidRuntime:E >"$OUT/$cls-log.txt" 2>&1 || true
+      timeout 60 adb logcat -d -b all -t 600 '*:W' 2>&1 | grep -v -E '^[0-9-]+ [0-9:.]+ +[0-9]+ +[0-9]+ [A-Z] (chromium|cr_[A-Za-z0-9_]*) *:' >"$OUT/$cls-log-all.txt" || true
+      timeout 60 adb logcat -d -b events -s am_kill am_crash am_proc_died am_anr am_low_memory >"$OUT/$cls-events.txt" 2>&1 || true
+    else
+      echo "(live phase $cls: no screenshot, logcat or facts are collected)"
+    fi
     timeout 30 adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
   fi
 }
@@ -472,23 +481,31 @@ fi
 
 # --- verification of the collected evidence --------------------------------------------------
 
-adb pull /sdcard/Download/qa/. "$OUT/" >/dev/null 2>&1 || true
-if selected L1 && [ ! -s "$OUT/l1.png" ]; then fail "l1.png was not produced"; fi
+# The L1 pixel gate: the screenshot must exist on the device. It is live-server evidence, so it is removed
+# there before anything is pulled and never reaches $OUT.
+if selected L1 && ! timeout 30 adb shell "[ -s $QA_DEVICE_OUT/l1.png ]" >/dev/null 2>&1; then fail "l1.png was not produced"; fi
+purge_live_evidence
+timeout 60 adb pull "$QA_DEVICE_OUT/." "$OUT/" >/dev/null 2>&1 || true
+qa_purge_live_dir "$OUT"
 
-# A missing phase file fails the run: on a full run every expected class must have an OK output.
-if [ -z "${QA_PHASES:-}" ]; then
-  for g in $ALLOWED; do
-    for cls in ${CLASSES[$g]}; do
-      if [ ! -s "$OUT/$cls.txt" ]; then
-        fail "missing phase output for $cls"
-      elif ! grep -q '^OK (' "$OUT/$cls.txt" && [[ " ${RAN[*]} " != *" $cls "* ]]; then
-        fail "phase $cls never ran"
-      fi
-    done
-  done
-fi
+# Nothing may pass by running nothing: every selected group (all groups of the tier/API on a normal run, exactly
+# the named ones on a debug run) must have run each of its classes with a passing, non-empty result.
+WANT=()
+if [ -z "${QA_PHASES:-}" ] || [[ " $QA_PHASES " == *" Warmup "* ]]; then WANT+=(ImeWarmupTest); fi
+for g in $PROBE_GROUPS $FULL_ORDER; do
+  if selected "$g"; then WANT+=(${CLASSES[$g]}); fi
+done
+if [ "${#RAN[@]}" -eq 0 ]; then fail "no phase ran"; fi
+if [ "${#WANT[@]}" -eq 0 ]; then fail "the request selected no test class"; fi
+for cls in "${WANT[@]}"; do
+  if [[ " ${OKCLS[*]:-} " != *" $cls "* ]]; then
+    fail "class $cls has no passing result"
+  elif [ ! -s "$OUT/$cls.txt" ]; then
+    fail "missing phase output for $cls"
+  fi
+done
 
-echo "=== QA SUMMARY api=$API phases run: ${RAN[*]:-none}"
+echo "=== QA SUMMARY api=$API phases run: ${RAN[*]:-none}; classes passed: ${#OKCLS[@]} of ${#WANT[@]} expected"
 if [ "${#FAILED[@]}" -gt 0 ]; then
   printf 'FAILED: %s\n' "${FAILED[@]}"
   exit 1
