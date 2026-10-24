@@ -21,7 +21,7 @@ export async function createService(options: ServiceOptions) {
   const upstream = new URL(options.upstream);
   if (upstream.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(upstream.hostname) || upstream.username || upstream.password) throw new Error("Upstream must be loopback HTTP");
   const state = await State.load(options.stateDirectory, options.observer?.now);
-  const counters = { events: 0, delivered: 0, delivery_errors: 0, stale_tokens: 0, request_errors: 0 };
+  const counters = { events: 0, delivered: 0, delivery_errors: 0, stale_tokens: 0, prune_errors: 0, request_errors: 0 };
   const observer = new Observer({ ...options.observer, upstream: options.upstream, origin: options.origin, emit: async (event: EventDetail) => {
     await state.addEvent(event);
     counters.events++;
@@ -31,7 +31,8 @@ export async function createService(options: ServiceOptions) {
         try { await options.send(token, event); counters.delivered++; }
         catch (error) {
           counters.delivery_errors++;
-          if (staleToken(error)) { await state.remove(id, token); counters.stale_tokens++; }
+          // A removal that cannot be persisted is retried by the next event; it must not stop later batches.
+          if (staleToken(error)) { try { await state.remove(id, token); counters.stale_tokens++; } catch { counters.prune_errors++; } }
         }
       }));
     }

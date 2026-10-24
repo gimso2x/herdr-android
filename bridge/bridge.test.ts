@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ServerWebSocket } from "bun";
-import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createService } from "./service.ts";
@@ -112,7 +112,8 @@ describe("authenticated private HTTP API", () => {
       expect((await f.request("/devices", "POST", { installation_id: INSTALLATION, fcm_token: "secret-token" }, { Origin: "https://attacker.example" })).status).toBe(403);
       expect((await f.request("/devices", "POST", { installation_id: INSTALLATION, fcm_token: "secret-token" }, { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
       expect((await f.request("/devices", "POST", "{}", { "Content-Type": "text/plain" })).status).toBe(415);
-      expect([400, 413]).toContain((await f.request("/devices", "POST", "x".repeat(9000))).status);
+      // Valid JSON, so only the size limit can refuse it.
+      expect((await f.request("/devices", "POST", { installation_id: INSTALLATION, fcm_token: "secret-token", pad: "x".repeat(9000) })).status).toBe(413);
       expect((await f.request("/devices", "POST", { installation_id: INSTALLATION, fcm_token: "bad token" })).status).toBe(400);
       expect(await f.service.state.devices()).toEqual([]);
       const health = await (await f.request("/health")).text();
@@ -288,6 +289,21 @@ describe("read-only live observer", () => {
       expect(JSON.parse(health).stale_tokens).toBe(2);
     } finally { release(); await f.close(); }
   });
+});
+
+test("a stale token whose removal cannot be persisted does not stop delivery to later devices", async () => {
+  let directory = "";
+  // The event is already persisted when sending starts; only the stale-token removal hits a read-only directory.
+  const f = await fixture(async token => { if (token === "token-stale") { await chmod(directory, 0o500); throw { code: "messaging/registration-token-not-registered" }; } });
+  directory = f.directory;
+  try {
+    expect((await f.register("token-stale")).status).toBe(204);
+    const others = Array.from({ length: 10 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`);
+    for (const [i, id] of others.entries()) expect((await f.request("/devices", "POST", { installation_id: id, fcm_token: `token-${i}` })).status).toBe(204);
+    try { await f.status("blocked"); } finally { await chmod(directory, 0o700); }
+    expect(f.delivered.map(x => x.token).sort()).toEqual(["token-stale", ...others.map((_, i) => `token-${i}`)].sort());
+    expect(JSON.parse(await (await f.request("/health")).text())).toMatchObject({ prune_errors: 1, stale_tokens: 0 });
+  } finally { await f.close(); }
 });
 
 test("production authenticator cannot accept missing, malformed or untrusted-cookie claims", async () => {
