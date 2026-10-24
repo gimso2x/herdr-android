@@ -97,6 +97,9 @@ for d in dirty1 dirty2 dirty3 dirty4 dirty5; do check "scan fails: $d" "$(no_ ci
 check "scan refuses to run without the secrets (exit 2)" "$(env -u CF_SECRET ci/secret-scan.sh "$T/clean" >/dev/null 2>&1; [ $? -eq 2 ]; echo $?)"
 mkdir -p "$T/apkdir" && (cd "$T/apkdir" && echo "x $CF_SECRET" >f.txt && zip -q -r ../bad.apk f.txt 2>/dev/null)
 if [ -f "$T/bad.apk" ]; then check "scan fails on a secret inside an APK" "$(no_ ci/secret-scan.sh --apk "$T/bad.apk" "$T/clean")"; fi
+check "scan refuses a missing --apk file (exit 2)" "$(ci/secret-scan.sh --apk "$T/absent.apk" "$T/clean" >/dev/null 2>&1; [ $? -eq 2 ]; echo $?)"
+echo 'not a zip' >"$T/broken.apk"
+check "scan refuses an --apk file that is not a readable archive (exit 2)" "$(ci/secret-scan.sh --apk "$T/broken.apk" "$T/clean" >/dev/null 2>&1; [ $? -eq 2 ]; echo $?)"
 
 if [ "$fails" -ne 0 ]; then echo "ci selftest: $fails check(s) FAILED"; exit 1; fi
 echo "ci selftest: all checks passed"

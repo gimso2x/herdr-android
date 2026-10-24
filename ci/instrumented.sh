@@ -222,10 +222,10 @@ run_phase() {
   elif reason=$(qa_check_phase "$cls" "$out" "$rc" "$expected"); then
     echo "=== phase $cls: OK ($(qa_executed_count "$out") tests executed)"
     OKCLS+=("$cls")
-    case "$cls" in P*) print_probe_lines ;; esac
+    case "$cls" in P[0-9]*) print_probe_lines ;; esac
   else
     fail "phase $cls did not pass: $reason"
-    case "$cls" in P*) print_probe_lines ;; esac
+    case "$cls" in P[0-9]*) print_probe_lines ;; esac
     if [ "$live" -eq 0 ]; then
       # Not a live phase: window focus, display and rotation settings and a screenshot are safe to keep.
       echo "--- device state after $cls"
@@ -259,6 +259,8 @@ wait_until() { # seconds command...
   done
 }
 
+
+is_root() { [ "$(adb shell id -u 2>/dev/null | tr -d '\r\n')" = "0" ]; }
 
 unroot() {
   adb unroot >/dev/null 2>&1 || true

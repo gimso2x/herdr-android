@@ -36,10 +36,13 @@ if [ "${#paths[@]}" -gt 0 ]; then
 fi
 apk=0
 for a in "${apks[@]}"; do
-  if [ -f "$a" ]; then
-    n=$(unzip -p "$a" 2>/dev/null | grep -c -F -e "$CF_SECRET" -e "$CF_ID" -e "$BASE_HOST" || true)
-    apk=$((apk + n))
+  # A named APK that is absent or unreadable would otherwise count as clean.
+  if [ ! -f "$a" ] || ! unzip -tqq "$a" >/dev/null 2>&1; then
+    echo "secret scan: --apk file missing or not a readable archive: $a" >&2
+    exit 2
   fi
+  n=$(unzip -p "$a" 2>/dev/null | grep -c -F -e "$CF_SECRET" -e "$CF_ID" -e "$BASE_HOST" || true)
+  apk=$((apk + n))
 done
 total=$((files + shapes + apk))
 echo "secret-scan files=$files cookie-or-jwt-files=$shapes apk=$apk"

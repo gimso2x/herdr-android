@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       tier:
-        description: 'full = everything incl. live L1-L4 and API 35; fast = fixture phases on API 34 only'
+        description: 'full = build plus emulator API 34 (all phases incl. live L1-L4) and API 35 subset; fast = build only, no emulator'
         type: choice
         options: [full, fast]
         default: full

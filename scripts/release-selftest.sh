@@ -4,7 +4,7 @@
 #
 #   scripts/release-selftest.sh
 #
-# Checks: a non-main branch and a detached HEAD are refused before any edit; an origin/main that HEAD does not
+# Checks: a non-main branch, a detached HEAD and uncommitted changes are refused before any edit; an origin/main that HEAD does not
 # contain is refused before any edit; a failed push takes the release commit and tag back; the happy path
 # (positive control) reaches an explicit atomic push of main and the tag.
 set -uo pipefail
@@ -63,6 +63,9 @@ check "non-main branch: refused before any network lookup" "$(! logged '^git (fe
 
 FAKE_BRANCH=HEAD FAKE_ANCESTOR_RC=0 FAKE_PUSH_RC=0 run
 check "detached HEAD: refused, no edits" "$([ "$RC" -eq 1 ] && no_edits; echo $?)"
+
+FAKE_BRANCH=main FAKE_DIRTY=1 FAKE_ANCESTOR_RC=0 FAKE_PUSH_RC=0 run
+check "uncommitted changes: refused, says so, no edits" "$([ "$RC" -eq 1 ] && grep -q 'uncommitted changes' <<<"$OUT" && no_edits; echo $?)"
 
 FAKE_BRANCH=main FAKE_ANCESTOR_RC=1 FAKE_PUSH_RC=0 run
 check "origin/main not an ancestor of HEAD: exit status 1" "$([ "$RC" -eq 1 ]; echo $?)"
