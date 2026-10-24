@@ -24,11 +24,11 @@
 
 ## 알림 설정
 
-토큰을 처음 입력하면(또는 업데이트 후 처음 열면) "처음 설정 안내" 화면이 나옵니다. 항목마다 상태(완료/필요)가 보이고, 시스템 설정을 다녀오면 다시 확인합니다. 다 끝내지 않아도 "시작하기"로 들어갈 수 있습니다. 나중에 설정 화면의 "처음 설정 안내 다시 보기"로 다시 열 수 있습니다.
+토큰을 처음 입력하면(또는 업데이트 후 처음 열면) "처음 설정 안내" 화면이 나옵니다. 앱이 확인하는 항목은 "알림 허용" 하나이며, 상태(완료/필요)를 보여 주고 시스템 설정을 다녀오면 다시 확인합니다. 허용하지 않아도 "시작하기"로 들어갈 수 있습니다. 나중에 설정 화면의 "처음 설정 안내 다시 보기"로 다시 열 수 있습니다. 아래 항목 중 알림 허용을 뺀 나머지는 앱이 감지하거나 표시하지 않으니 직접 확인하세요.
 
 - **알림 허용**: 알림 권한을 허용합니다(Android 13+). 이미 거부해서 대화상자가 더 뜨지 않으면 앱 알림 설정이 열립니다.
 - **Google Play 서비스**: FCM 수신에 필요합니다. 앱을 항상 켜 두거나 배터리 제한을 해제할 필요는 없습니다.
-- **사용하지 않는 앱 일시중지 끄기**: Android가 오래 열지 않은 앱의 권한을 회수하지 않도록 앱 설정에서 끕니다.
+- **사용하지 않는 앱 일시중지 끄기**: Android가 오래 열지 않은 앱의 권한을 회수하지 않도록 앱 정보 화면에서 직접 끕니다.
 - **삼성 기기**: 알림이 늦는 경우에만 백그라운드 사용 제한에서 herdr가 깊은 절전 앱으로 지정됐는지 확인하세요.
 - **설정 여는 법**: 홈 화면에서 herdr 아이콘을 길게 눌러 "설정"을 고릅니다.
 - 상시 "에이전트 알림 대기 중" 알림은 더 이상 사용하지 않습니다.
@@ -47,6 +47,13 @@
 Firebase 프로젝트에 `com.gimso2x.herdr`와 `com.gimso2x.herdr.debug`를 등록합니다. 두 앱이 포함된 `google-services.json`은 저장소에 넣지 않고 base64로 인코딩해 GitHub Secret `HERDR_GOOGLE_SERVICES_B64`에 저장합니다. CI는 빌드할 때만 파일을 생성합니다. 설정값은 APK에 포함되므로 Secret 사용이 APK 안의 Firebase API 키를 숨기는 것은 아닙니다. 서비스 계정 비공개 키는 앱과 CI에 넣지 않습니다.
 
 `bridge/`는 서버의 Bun 프로세스입니다. 서비스 계정은 서버 전용 파일(권한 600)에 보관하고 `HERDR_PUSH_SERVICE_ACCOUNT`로 지정합니다. 중계기는 loopback에만 바인딩하며, Cloudflare Tunnel에서 `/api/android-push/`만 해당 포트로 라우팅합니다. 이 경로에도 기존 Access 앱의 JWT 검증을 적용해야 합니다. `HERDR_PUSH_ACCESS_TEAM`, `HERDR_PUSH_ACCESS_AUD`, `HERDR_PUSH_PUBLIC_ORIGIN`은 같은 Access 앱과 서버 주소로 설정합니다. herdr-web-ui 원본 코드나 Access 인증 예외는 필요하지 않습니다.
+
+실행은 `bun install --cwd bridge --frozen-lockfile` 후 `bun run bridge/server.ts`입니다. 나머지 환경 변수와 기본값은 다음과 같습니다(`bridge/server.ts`).
+
+- `HERDR_PUSH_PORT`: 기본 `7318`. `127.0.0.1`에만 바인딩하므로 Tunnel 대상도 `http://127.0.0.1:<포트>`로 적습니다.
+- `HERDR_PUSH_UPSTREAM`: 기본 `http://127.0.0.1:7317`. loopback HTTP만 허용하며, 중계기는 이 주소의 `/ws`와 `/api/session`에 인증 정보 없이 접속하므로 herdr-web-ui가 loopback 접속을 토큰 없이 받아야 합니다.
+- `HERDR_PUSH_STATE_DIR`: 기본 `~/.config/herdr-android/push-state`(권한 700). 등록된 FCM 토큰과, 알림 상세용으로 12시간 동안 workspace·tab·에이전트·pane 제목을 담은 `state.json`(권한 600)이 저장됩니다.
+- `HERDR_PUSH_SERVICE_ACCOUNT`: 기본 `~/.config/herdr-android/fcm-service-account.json`. 그룹·기타 권한이 없는 64 KiB 이하 일반 파일이어야 합니다.
 
 
 ## 음성 입력
