@@ -15,6 +15,8 @@ export interface EventDetail {
   agent?: string;
   pane_title?: string;
   detail?: string;
+  // Only events for panes on a remote herdr machine carry this.
+  machine_id?: string;
 }
 interface DiskState { devices: Record<string, string>; events: EventDetail[] }
 

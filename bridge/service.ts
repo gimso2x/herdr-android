@@ -4,6 +4,8 @@ import { staleToken } from "./boundaries.ts";
 import type { Authenticate, Send } from "./boundaries.ts";
 import { Observer } from "./observer.ts";
 import type { ObserverOptions } from "./observer.ts";
+import { MachinesSource } from "./machines.ts";
+import type { MachinesOptions } from "./machines.ts";
 
 export interface ServiceOptions {
   origin: string;
@@ -13,6 +15,8 @@ export interface ServiceOptions {
   send: Send;
   port?: number;
   observer?: Pick<ObserverOptions, "now" | "monotonic" | "signal" | "reconnect">;
+  // Remote-machine stream; clocks default to the observer's, signal and reconnect never do.
+  machines?: Pick<MachinesOptions, "now" | "monotonic" | "signal" | "reconnect">;
 }
 
 export async function createService(options: ServiceOptions) {
@@ -22,7 +26,7 @@ export async function createService(options: ServiceOptions) {
   if (upstream.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(upstream.hostname) || upstream.username || upstream.password) throw new Error("Upstream must be loopback HTTP");
   const state = await State.load(options.stateDirectory, options.observer?.now);
   const counters = { events: 0, delivered: 0, delivery_errors: 0, stale_tokens: 0, prune_errors: 0, request_errors: 0 };
-  const observer = new Observer({ ...options.observer, upstream: options.upstream, origin: options.origin, emit: async (event: EventDetail) => {
+  const emit = async (event: EventDetail) => {
     await state.addEvent(event);
     counters.events++;
     const devices = await state.devices();
@@ -36,7 +40,9 @@ export async function createService(options: ServiceOptions) {
         }
       }));
     }
-  } });
+  };
+  const observer = new Observer({ ...options.observer, upstream: options.upstream, origin: options.origin, emit });
+  const machines = new MachinesSource({ now: options.observer?.now, monotonic: options.observer?.monotonic, ...options.machines, upstream: options.upstream, origin: options.origin, emit });
   const server = Bun.serve({
     hostname: "127.0.0.1", port: options.port ?? 7318, maxRequestBodySize: 8192,
     async fetch(request) {
@@ -52,7 +58,8 @@ export async function createService(options: ServiceOptions) {
           if (!event) return reply(404, { error: "Not found" });
           let detail: string | undefined;
           try {
-            const path = event.kind === "needs_input" ? "/api/pane/prompt" : "/api/pane/conversation";
+            const leaf = event.kind === "needs_input" ? "prompt" : "conversation";
+            const path = event.machine_id ? `/api/machines/${encodeURIComponent(event.machine_id)}/pane/${leaf}` : `/api/pane/${leaf}`;
             const target = new URL(path, options.upstream);
             target.searchParams.set("pane_id", event.pane_id);
             const response = await fetch(target, { redirect: "error", signal: AbortSignal.timeout(5000) });
@@ -105,5 +112,6 @@ export async function createService(options: ServiceOptions) {
     error() { return new Response('{"error":"Request failed"}', { status: 400, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } }); },
   });
   observer.start();
-  return { server, state, observer, async close() { await observer.stop(); server.stop(true); await state.flush(); } };
+  machines.start();
+  return { server, state, observer, machines, async close() { await Promise.all([observer.stop(), machines.stop()]); server.stop(true); await state.flush(); } };
 }
