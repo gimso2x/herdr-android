@@ -1,7 +1,8 @@
 package com.gimso2x.herdr.watch
 
 /**
- * `herdr://pane/<percent-encoded pane id>`: the data URI of an alert's open-pane intent. Android
+ * `herdr://pane/<percent-encoded pane id>[?machine=<machine id>]`: the data URI of an alert's
+ * open-pane intent; a local pane has no query, so its URI is the same as before machines existed. Android
  * matches PendingIntents by request code and [android.content.Intent.filterEquals], which ignores
  * extras, so the complete pane id must live in a field filterEquals compares. Unlike
  * `String.hashCode()` (`w10P:p1` and `w111:p1` collide) the encoding is injective.
@@ -12,7 +13,31 @@ object PaneLink {
     // Same unreserved set as android.net.Uri.encode: everything else is percent-encoded as UTF-8.
     private const val UNRESERVED = "_-!.~'()*"
 
-    fun uri(paneId: String): String = PREFIX + encode(paneId)
+    const val LOCAL = "local"
+    private const val MACHINE_QUERY = "?machine="
+    private val MACHINE_ID = Regex("^[A-Za-z0-9._-]{1,128}$")
+
+    fun uri(paneId: String, machineId: String = LOCAL): String =
+        PREFIX + encode(paneId) + if (machineId == LOCAL) "" else MACHINE_QUERY + machineId
+
+    /** [raw] when it is a well-formed machine id, else null. */
+    fun validMachineId(raw: String?): String? = raw?.takeIf { MACHINE_ID.matches(it) }
+
+    /** Machine id carried by an [uri] result; [LOCAL] when absent, malformed or not a pane link. */
+    fun machineOf(uri: String?): String {
+        if (uri == null || !uri.startsWith(PREFIX)) return LOCAL
+        // Encoded pane ids never contain '?', so the first one starts the machine query.
+        val query = uri.substringAfter('?', "")
+        if (!query.startsWith("machine=")) return LOCAL
+        return validMachineId(query.removePrefix("machine=")) ?: LOCAL
+    }
+
+    /**
+     * Notification tag of a pane: the bare pane id for the local machine (as before), else machine
+     * and pane joined by U+001F. Pane ids reject control characters, so no local id can equal a remote key.
+     */
+    fun alertKey(paneId: String, machineId: String = LOCAL): String =
+        if (machineId == LOCAL) paneId else "$machineId\u001F$paneId"
 
     internal fun encode(value: String): String {
         val out = StringBuilder()

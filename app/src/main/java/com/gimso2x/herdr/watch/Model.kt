@@ -40,7 +40,14 @@ data class PaneSample(
 enum class AlertKind { NEEDS_INPUT, FINISHED }
 
 /** Existing alert presentation model; private [detail] is supplied by the authenticated event API. */
-data class Alert(val paneId: String, val kind: AlertKind, val sample: PaneSample, val detail: String? = null) {
+data class Alert(
+    val paneId: String,
+    val kind: AlertKind,
+    val sample: PaneSample,
+    val detail: String? = null,
+    /** herdr machine that owns the pane; [PaneLink.LOCAL] unless the bridge detail names a remote one. */
+    val machineId: String = PaneLink.LOCAL,
+) {
     private val text: AlertText.Text get() = AlertText.format(kind, sample, detail)
     val title: String get() = text.title
     val body: String get() = text.body

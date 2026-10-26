@@ -65,6 +65,24 @@ class PushEventTest {
         assertEquals(1, ledger.all().size)
     }
 
+    @Test fun detailMachineIdIsReadWhenWellFormedElseLocal() {
+        val e = event()
+        fun body(extra: String) =
+            """{"event_id":"${e.eventId}","pane_id":"${e.paneId}","server_origin":"$origin","kind":"needs_input","created_at":$now$extra}"""
+        assertEquals("fixture-m1", PushDetail.parse(body(",\"machine_id\":\"fixture-m1\""), e, now)!!.machineId)
+        assertEquals("local", PushDetail.parse(body(""), e, now)!!.machineId)
+        assertEquals("local", PushDetail.parse(body(",\"machine_id\":null"), e, now)!!.machineId)
+        assertEquals("local", PushDetail.parse(body(",\"machine_id\":\"local\""), e, now)!!.machineId)
+        for (bad in listOf("\"\"", "\"a/b\"", "\"a b\"", "\"x&y\"", "\"${"m".repeat(129)}\"", "12", "true", "{}")) {
+            assertEquals(bad, "local", PushDetail.parse(body(",\"machine_id\":$bad"), e, now)!!.machineId)
+        }
+        assertEquals("m".repeat(128), PushDetail.parse(body(",\"machine_id\":\"${"m".repeat(128)}\""), e, now)!!.machineId)
+    }
+
+    @Test fun fcmEnvelopeStillRejectsAMachineField() {
+        assertNull(PushEvent.decode(data() + ("machine_id" to "fixture-m1"), now, now, origin))
+    }
+
     @Test fun authenticatedDetailMustMatchIdentityOriginKindAndAge() {
         val e = event()
         fun body(id: String = e.eventId, pane: String = e.paneId, host: String = origin,

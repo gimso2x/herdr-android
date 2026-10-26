@@ -72,8 +72,8 @@ class UrlPolicy(private val baseUrl: () -> String?) {
 
 /** Builds the URL that opens a pane's chat (same shape as herdr-web-ui's notificationclick). */
 object DeepLink {
-    fun paneUrl(baseUrl: String, paneId: String): String =
-        "${baseUrl.trimEnd('/')}/?machine=local&pane=${encodeComponent(paneId)}&view=chat"
+    fun paneUrl(baseUrl: String, paneId: String, machineId: String = "local"): String =
+        "${baseUrl.trimEnd('/')}/?machine=${encodeComponent(machineId)}&pane=${encodeComponent(paneId)}&view=chat"
 
     // Mirror encodeURIComponent: URLEncoder writes a space as '+'.
     private fun encodeComponent(value: String): String =

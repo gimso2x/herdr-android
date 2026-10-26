@@ -69,6 +69,7 @@ import com.gimso2x.herdr.shell.UrlDecision
 import com.gimso2x.herdr.shell.UrlPolicy
 import com.gimso2x.herdr.ui.HerdrTheme
 import com.gimso2x.herdr.ui.SetupError
+import com.gimso2x.herdr.watch.PaneLink
 import com.gimso2x.herdr.watch.WatcherController
 import java.net.URISyntaxException
 import kotlinx.coroutines.Dispatchers
@@ -647,7 +648,7 @@ class MainActivity : ComponentActivity() {
 
     private fun paneUrl(intent: Intent?): String? {
         val pane = intent?.getStringExtra(EXTRA_PANE_ID)?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        return DeepLink.paneUrl(HerdrConfig.baseUrl, pane)
+        return DeepLink.paneUrl(HerdrConfig.baseUrl, pane, PaneLink.machineOf(intent?.dataString))
     }
 
     companion object {

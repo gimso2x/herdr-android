@@ -50,7 +50,11 @@ object WatchNotifications {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         if (manager.activeNotifications.any { it.id == NOTIFY_ALERT && it.tag == event.paneId &&
                 it.notification.extras.getString(EXTRA_EVENT_ID) == event.eventId }) {
-            manager.notify(event.paneId, NOTIFY_ALERT, notification(context, event, alert, true, false))
+            // The generic alert used the pane-only key (machine unknown). A remote pane moves to its
+            // machine key so the same pane id on another machine never overwrites it.
+            val tag = PaneLink.alertKey(event.paneId, alert.machineId)
+            if (tag != event.paneId) manager.cancel(event.paneId, NOTIFY_ALERT)
+            manager.notify(tag, NOTIFY_ALERT, notification(context, event, alert, true, false))
         }
     }
 
@@ -74,7 +78,7 @@ object WatchNotifications {
             .setContentTitle(if (generic) context.getString(R.string.app_name) else alert.title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(if (generic) body else alert.bigText))
-            .setContentIntent(openApp(context, event.paneId))
+            .setContentIntent(openApp(context, event.paneId, alert.machineId))
             .setAutoCancel(true)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(publicVersion)
@@ -88,11 +92,11 @@ object WatchNotifications {
         android.os.Build.VERSION.SDK_INT < 33 ||
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    /** Exact pane identity is part of Intent.filterEquals, so unrelated panes never share extras. */
-    private fun openApp(context: Context, paneId: String): PendingIntent {
+    /** Exact pane and machine identity are part of Intent.filterEquals, so unrelated panes never share extras. */
+    private fun openApp(context: Context, paneId: String, machineId: String): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            data = Uri.parse(PaneLink.uri(paneId))
+            data = Uri.parse(PaneLink.uri(paneId, machineId))
             putExtra(MainActivity.EXTRA_PANE_ID, paneId)
         }
         return PendingIntent.getActivity(context, NOTIFY_ALERT, intent,

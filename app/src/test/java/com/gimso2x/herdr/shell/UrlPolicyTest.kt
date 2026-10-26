@@ -209,6 +209,25 @@ class UrlPolicyTest {
     }
 
     @Test
+    fun deepLinkCarriesRemoteMachineId() {
+        assertEquals(
+            "https://herdr.example.com/?machine=fixture-m_1.x&pane=w1V%3Ap1&view=chat",
+            DeepLink.paneUrl("https://herdr.example.com", "w1V:p1", "fixture-m_1.x"),
+        )
+        assertEquals(
+            DeepLink.paneUrl("https://herdr.example.com", "w1V:p1", "local"),
+            DeepLink.paneUrl("https://herdr.example.com", "w1V:p1"),
+        )
+    }
+
+    @Test
+    fun deepLinkEncodesMachineIdAndStaysInApp() {
+        val url = DeepLink.paneUrl("https://herdr.example.com", "p1", "a b&c=d/e")
+        assertEquals("https://herdr.example.com/?machine=a%20b%26c%3Dd%2Fe&pane=p1&view=chat", url)
+        assertEquals(UrlDecision.InApp, main(url))
+    }
+
+    @Test
     fun deepLinkResultIsInApp() {
         val url = DeepLink.paneUrl("https://herdr.example.com", "w1V:p1&x=https://evil.com")
         assertEquals(UrlDecision.InApp, main(url))

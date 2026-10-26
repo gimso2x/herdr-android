@@ -25,6 +25,42 @@ class PaneLinkTest {
     }
 
     @Test
+    fun localUriIsTheSameAsBeforeMachinesExisted() {
+        assertEquals(PaneLink.uri("w1:p1"), PaneLink.uri("w1:p1", "local"))
+        assertEquals("herdr://pane/w1%3Ap1", PaneLink.uri("w1:p1", "local"))
+        assertEquals("local", PaneLink.machineOf(PaneLink.uri("w1:p1")))
+    }
+
+    @Test
+    fun remoteUriRoundTripsMachineAndIsDistinctPerMachine() {
+        val uri = PaneLink.uri("w1:p1", "fixture-m1")
+        assertEquals("herdr://pane/w1%3Ap1?machine=fixture-m1", uri)
+        assertEquals("fixture-m1", PaneLink.machineOf(uri))
+        assertNotEquals(uri, PaneLink.uri("w1:p1", "fixture-m2"))
+        assertNotEquals(uri, PaneLink.uri("w1:p1"))
+    }
+
+    @Test
+    fun malformedOrForeignLinksFallBackToLocal() {
+        assertEquals("local", PaneLink.machineOf(null))
+        assertEquals("local", PaneLink.machineOf("https://pane/x?machine=m1"))
+        assertEquals("local", PaneLink.machineOf("herdr://pane/p1?machine=a%2Fb"))
+        assertEquals("local", PaneLink.machineOf("herdr://pane/p1?machine="))
+        assertEquals("local", PaneLink.machineOf("herdr://pane/p1?machine=m1&x=1"))
+        assertEquals("local", PaneLink.machineOf("herdr://pane/p1?other=m1"))
+    }
+
+    @Test
+    fun alertKeyDiffersPerMachineAndLocalKeepsTheBareId() {
+        assertEquals("w1:p1", PaneLink.alertKey("w1:p1"))
+        assertEquals("w1:p1", PaneLink.alertKey("w1:p1", "local"))
+        val keys = listOf(PaneLink.alertKey("w1:p1"), PaneLink.alertKey("w1:p1", "m1"),
+            PaneLink.alertKey("w1:p1", "m2"), PaneLink.alertKey("p1", "m1"))
+        assertEquals(keys.size, keys.toSet().size)
+        assertNotEquals(PaneLink.alertKey("m1\u001Fp1"), PaneLink.alertKey("p1", "m1"))
+    }
+
+    @Test
     fun distinctPaneIdsNeverShareAUri() {
         val ids = listOf("w1:p1", "w1%3Ap1", "w1:p1/", "W1:p1", "w1:p1 ", "")
         assertEquals(ids.size, ids.map { PaneLink.uri(it) }.toSet().size)

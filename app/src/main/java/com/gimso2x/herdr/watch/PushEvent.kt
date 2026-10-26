@@ -63,7 +63,8 @@ object PushDetail {
         ) null else {
             fun text(key: String): String? = if (json.isNull(key)) null else json.optString(key).takeIf { it.isNotBlank() }
             Alert(event.paneId, event.kind, PaneSample(event.paneId, AgentStatus.UNKNOWN,
-                text("workspace"), text("tab"), text("agent"), text("pane_title")), text("detail"))
+                text("workspace"), text("tab"), text("agent"), text("pane_title")), text("detail"),
+                PaneLink.validMachineId(json.opt("machine_id") as? String) ?: PaneLink.LOCAL)
         }
     } catch (_: Exception) {
         null
