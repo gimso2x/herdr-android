@@ -22,7 +22,9 @@ import org.junit.runner.RunWith
 // the guard drops input/resize/... frames, rewrites the WebSocket role to observe and rejects any
 // non-GET/HEAD request (L1 asserts nothing was blocked).
 
-private const val TITLE = "herdr web ui"
+// The live web UI was rebranded: its release titles the document "Ovis" (formerly "herdr web ui"), so the
+// base title is matched in either form. Pane titles end in " · Ovis" (formerly " · herdr").
+private const val TITLE_IS_BASE = "(document.title === 'Ovis' || document.title === 'herdr web ui')"
 
 private fun liveGuardOn() {
     check(LiveQaGuard.isSupported()) { "DOCUMENT_START_SCRIPT unsupported by this WebView" }
@@ -30,11 +32,11 @@ private fun liveGuardOn() {
 }
 
 /**
- * herdr-web-ui titles the document "herdr web ui" until a pane is selected and "<pane> · herdr"
- * afterwards (App.tsx), so the live page is recognised by either form.
+ * The live web UI titles the document "Ovis" until a pane is selected and "<pane> · Ovis" afterwards
+ * (earlier releases: "herdr web ui" and "<pane> · herdr"), so the live page is recognised by any of these forms.
  */
 private const val TITLE_IS_HERDR =
-    "(document.title === 'herdr web ui' || document.title.endsWith(' · herdr'))"
+    "($TITLE_IS_BASE || document.title.endsWith(' · Ovis') || document.title.endsWith(' · herdr'))"
 
 private fun awaitLivePage(timeoutMs: Long, extra: String = "true", detail: () -> String = { "" }) {
     Qa.until(timeoutMs, "live herdr page", detail) {
@@ -67,7 +69,7 @@ class L1LiveLoadTest {
                 60_000,
                 "document.body.innerText.toLowerCase().indexOf($quoted) >= 0",
             ) {
-                "titleIsHerdr=${Qa.js(TITLE_IS_HERDR)} bodyChars=${Qa.js("document.body.innerText.length")} " +
+                "titleIsHerdr=${Qa.js(TITLE_IS_HERDR)} title=${Qa.jsString("document.title")} bodyChars=${Qa.js("document.body.innerText.length")} " +
                     "inText=${Qa.js("document.body.textContent.toLowerCase().indexOf($quoted) >= 0")}"
             }
             assertEquals(0L, (Qa.js("window.__qaBlocked") as Number).toLong())
@@ -177,7 +179,7 @@ class L3ExpiryRecoveryTest {
             Qa.until(60_000, "herdr page again after the reload (new document)") {
                 val host = Qa.jsString("location.host")
                 if (Qa.isAccessHost(host)) onAccess = true
-                Qa.js("window.__l3old === undefined && document.title === ${JSONObject.quote(TITLE)} && location.host === ${JSONObject.quote(Qa.liveHost)}") == true
+                Qa.js("window.__l3old === undefined && $TITLE_IS_BASE && location.host === ${JSONObject.quote(Qa.liveHost)}") == true
             }
             assertTrue("a Cloudflare Access page was displayed", !onAccess)
             assertEquals(Qa.liveHost, Qa.jsString("location.host"))
