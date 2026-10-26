@@ -34,10 +34,16 @@ object PaneLink {
 
     /**
      * Notification tag of a pane: the bare pane id for the local machine (as before), else machine
-     * and pane joined by U+001F. Pane ids reject control characters, so no local id can equal a remote key.
+     * and pane joined by U+001F. Injective by construction: a remote key starts with a machine id
+     * ([MACHINE_ID] characters only, never a control char) and contains U+001F; a bare local key
+     * contains no control char; a local id that does contain one is prefixed with U+0018 (CAN), so it
+     * starts with a control char and cannot equal a bare or remote key.
      */
-    fun alertKey(paneId: String, machineId: String = LOCAL): String =
-        if (machineId == LOCAL) paneId else "$machineId\u001F$paneId"
+    fun alertKey(paneId: String, machineId: String = LOCAL): String = when {
+        machineId != LOCAL -> "$machineId\u001F$paneId"
+        paneId.any { it.isISOControl() } -> "\u0018$paneId"
+        else -> paneId
+    }
 
     internal fun encode(value: String): String {
         val out = StringBuilder()

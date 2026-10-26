@@ -58,6 +58,8 @@ class PaneLinkTest {
             PaneLink.alertKey("w1:p1", "m2"), PaneLink.alertKey("p1", "m1"))
         assertEquals(keys.size, keys.toSet().size)
         assertNotEquals(PaneLink.alertKey("m1\u001Fp1"), PaneLink.alertKey("p1", "m1"))
+        assertNotEquals(PaneLink.alertKey("\u0018p1"), PaneLink.alertKey("p1"))
+        assertEquals(2, setOf(PaneLink.alertKey("a\u0001"), PaneLink.alertKey("\u0018a\u0001")).size)
     }
 
     @Test
