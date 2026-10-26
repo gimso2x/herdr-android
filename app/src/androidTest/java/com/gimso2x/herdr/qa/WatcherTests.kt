@@ -18,6 +18,7 @@ import com.gimso2x.herdr.SettingsActivity
 import com.gimso2x.herdr.SettingsViewModel
 import com.gimso2x.herdr.watch.AlertKind
 import com.gimso2x.herdr.watch.AppForeground
+import com.gimso2x.herdr.watch.PaneLink
 import com.gimso2x.herdr.watch.PushEvent
 import com.gimso2x.herdr.watch.PushNotificationObserver
 import com.gimso2x.herdr.watch.PushRegistration
@@ -63,7 +64,7 @@ class WatchFixture {
         }
     }
     fun start(): WatchFixture { fx.start(); return this }
-    fun event(pane: String = PANE_1, kind: AlertKind = AlertKind.NEEDS_INPUT, at: Long = System.currentTimeMillis()): PushEvent {
+    fun event(pane: String = PANE_1, kind: AlertKind = AlertKind.NEEDS_INPUT, at: Long = System.currentTimeMillis(), machine: String? = null): PushEvent {
         val e = PushEvent(UUID.randomUUID().toString(), kind, pane, fx.base, at)
         fx.routes["/api/android-push/events/${e.eventId}"] = { request ->
             check(request.method == "GET")
@@ -74,7 +75,8 @@ class WatchFixture {
                 .setBody(JSONObject().put("event_id", e.eventId).put("kind", if (kind == AlertKind.NEEDS_INPUT) "needs_input" else "finished")
                     .put("pane_id", pane).put("server_origin", fx.base).put("created_at", at)
                     .put("workspace", "fixture").put("tab", if (pane == PANE_1) "main" else "logs")
-                    .put("agent", "omp").put("pane_title", "Fixture task").put("detail", "Fixture detail.\nmore").toString())
+                    .put("agent", "omp").put("pane_title", "Fixture task").put("detail", "Fixture detail.\nmore")
+                    .apply { if (machine != null) put("machine_id", machine) }.toString())
         }
         return e
     }
@@ -183,6 +185,49 @@ class W1NotifyTest {
                 assertEquals(WatchNotifications.CHANNEL_FINISHED, PushQa.active(finished).notification.channelId)
                 assertEquals(2, wf.fx.log.count { it.path.orEmpty().startsWith("/api/android-push/events/") })
                 assertEquals(0, wf.fx.count("/api/session"))
+            }
+        } finally { wf.stop() }
+    }
+
+    @Test fun remoteDetailReplacingGenericAlertIsPostedSilentlyUnderMachineKey() {
+        Qa.resetState(true, Qa.syntheticToken())
+        val wf = WatchFixture().start()
+        PushQa.connectListener()
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                PushQa.registrationDone()
+                PushQa.background()
+                val machine = "qa-machine-2"
+                val key = PaneLink.alertKey(WatchFixture.PANE_1, machine)
+                val event = wf.event(machine = machine)
+                val (receipt, generic) = PushQa.inject(event)
+                // The generic alert is the one that alerts: pane-only key, not silenced.
+                assertEquals(event.paneId, generic.tag)
+                assertEquals(Notification.GROUP_ALERT_ALL, generic.notification.groupAlertBehavior)
+                assertFalse(generic.notification.group == "silent")
+                PushQa.await(wf.detailEntered)
+                val detail = runBlocking {
+                    val update = async(start = CoroutineStart.UNDISPATCHED) { PushNotificationObserver.events.first {
+                        !it.removed && it.notification.tag == key &&
+                            it.notification.notification.extras.getString(WatchNotifications.EXTRA_EVENT_ID) == event.eventId
+                    }.notification }
+                    wf.releaseDetail.countDown()
+                    PushQa.done(receipt)
+                    withTimeout(20_000) { update.await() }
+                }
+                assertEquals("fixture · main", PushQa.text(detail, Notification.EXTRA_TITLE))
+                // The pane-key alert is gone; only the machine-key detail remains for this event.
+                val active = PushQa.notifications.activeNotifications.filter {
+                    it.id == WatchNotifications.NOTIFY_ALERT &&
+                        it.notification.extras.getString(WatchNotifications.EXTRA_EVENT_ID) == event.eventId }
+                assertEquals(listOf(key), active.map { it.tag })
+                // setSilent(true): not-summary notification gets GROUP_ALERT_SUMMARY in the "silent" group, no sound/vibrate.
+                val n = active.single().notification
+                assertEquals(Notification.GROUP_ALERT_SUMMARY, n.groupAlertBehavior)
+                assertEquals("silent", n.group)
+                assertEquals(0, n.defaults and (Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE))
+                assertTrue(n.sound == null && n.vibrate == null)
+                assertEquals(WatchNotifications.CHANNEL_NEEDS_INPUT, n.channelId)
             }
         } finally { wf.stop() }
     }

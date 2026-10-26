@@ -53,8 +53,11 @@ object WatchNotifications {
             // The generic alert used the pane-only key (machine unknown). A remote pane moves to its
             // machine key so the same pane id on another machine never overwrites it.
             val tag = PaneLink.alertKey(event.paneId, alert.machineId)
-            if (tag != event.paneId) manager.cancel(event.paneId, NOTIFY_ALERT)
-            manager.notify(tag, NOTIFY_ALERT, notification(context, event, alert, true, false))
+            val relocated = tag != event.paneId
+            if (relocated) manager.cancel(event.paneId, NOTIFY_ALERT)
+            // setOnlyAlertOnce only holds for updates of the same tag; a relocated notification is a new
+            // one, so it must be silenced explicitly (the user was already alerted by the generic one).
+            manager.notify(tag, NOTIFY_ALERT, notification(context, event, alert, true, false, relocated))
         }
     }
 
@@ -66,7 +69,8 @@ object WatchNotifications {
         }
     }
 
-    private fun notification(context: Context, event: PushEvent, alert: Alert, silent: Boolean, generic: Boolean): Notification {
+    private fun notification(context: Context, event: PushEvent, alert: Alert, silent: Boolean, generic: Boolean,
+                              replacesAlerted: Boolean = false): Notification {
         val channel = if (event.kind == AlertKind.NEEDS_INPUT) CHANNEL_NEEDS_INPUT else CHANNEL_FINISHED
         val publicVersion = NotificationCompat.Builder(context, channel)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
@@ -83,6 +87,7 @@ object WatchNotifications {
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(publicVersion)
             .setOnlyAlertOnce(silent)
+            .apply { if (replacesAlerted) setSilent(true) }
             .addExtras(Bundle().apply { putString(EXTRA_EVENT_ID, event.eventId) })
             .setPriority(if (event.kind == AlertKind.NEEDS_INPUT) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
             .build()
