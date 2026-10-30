@@ -35,6 +35,9 @@ export async function createService(options: ServiceOptions) {
         try { await options.send(token, event); counters.delivered++; }
         catch (error) {
           counters.delivery_errors++;
+          // Only the error code: messages may echo request data, and the token must stay out of the journal.
+          const code = typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : "unknown";
+          console.error(`FCM delivery failed: ${code.slice(0, 100)}`);
           // A removal that cannot be persisted is retried by the next event; it must not stop later batches.
           if (staleToken(error)) { try { await state.remove(id, token); counters.stale_tokens++; } catch { counters.prune_errors++; } }
         }
