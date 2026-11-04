@@ -27,7 +27,8 @@ export async function createService(options: ServiceOptions) {
   const state = await State.load(options.stateDirectory, options.observer?.now);
   const counters = { events: 0, delivered: 0, delivery_errors: 0, stale_tokens: 0, prune_errors: 0, request_errors: 0 };
   const emit = async (event: EventDetail) => {
-    await state.addEvent(event);
+    // A withdrawal has no private detail to fetch, so it is never cached for the event API.
+    if (event.kind !== "resolved") await state.addEvent(event);
     counters.events++;
     const devices = await state.devices();
     for (let offset = 0; offset < devices.length; offset += 10) {

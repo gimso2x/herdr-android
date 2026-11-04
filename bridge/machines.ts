@@ -7,7 +7,8 @@ import type { EventDetail, Kind } from "./state.ts";
 // Status rules deliberately mirror observer.ts.
 
 type Pane = Record<string, unknown> & { pane_id: string; agent_status: string; background_wait?: boolean };
-interface Tracked { machine: string; pane: Pane; busy: boolean; blocked: boolean; start?: number }
+// ask: event_id of the needs_input sent for the current blocked spell, withdrawn when it ends.
+interface Tracked { machine: string; pane: Pane; busy: boolean; blocked: boolean; start?: number; ask?: string }
 export interface MachinesOptions {
   upstream: string;
   origin: string;
@@ -172,21 +173,29 @@ export class MachinesSource {
       const busy = pane.background_wait || ["working", "blocked"].includes(pane.agent_status);
       const blocked = pane.agent_status === "blocked";
       const start = busy ? state.busy ? state.start : received : undefined;
-      this.tracked.set(key, { machine, pane, busy, blocked, start });
-      if (blocked && !state.blocked) await this.notify(machine, pane, "needs_input");
+      const next: Tracked = { machine, pane, busy, blocked, start, ask: blocked ? state.ask : undefined };
+      this.tracked.set(key, next);
+      if (blocked && !state.blocked) next.ask = await this.notify(machine, pane, "needs_input");
+      if (!blocked && state.ask) await this.resolve(machine, pane, state.ask);
       if (!busy && state.busy && state.start !== undefined && received - state.start >= 60000 && ["idle", "done"].includes(pane.agent_status)) await this.notify(machine, pane, "finished");
     } else if (message.type === "pane-exited") {
       this.tracked.delete(key);
       if (state) this.gone.add(key);
+      if (state?.ask) await this.resolve(machine, state.pane, state.ask);
       if (state?.busy && state.start !== undefined && received - state.start >= 60000) await this.notify(machine, state.pane, "finished");
     }
   }
-  private async notify(machine: string, pane: Pane, kind: Kind) {
+  private async notify(machine: string, pane: Pane, kind: Exclude<Kind, "resolved">) {
     const event: EventDetail = { event_id: crypto.randomUUID(), kind, pane_id: pane.pane_id, server_origin: this.options.origin, created_at: (this.options.now ?? Date.now)(), machine_id: machine };
     for (const [field, value] of [["workspace", pane.workspace_label], ["tab", pane.tab_label], ["agent", pane.display_agent ?? pane.agent], ["pane_title", pane.terminal_title_stripped ?? pane.title ?? pane.label]] as const) {
       if (typeof value === "string") event[field] = value.slice(0, 4096);
     }
     await this.options.emit(event);
+    return event.event_id;
+  }
+  // Identifiers only: the app cancels the alert of `ask` and shows nothing.
+  private async resolve(machine: string, pane: Pane, ask: string) {
+    await this.options.emit({ event_id: crypto.randomUUID(), kind: "resolved", pane_id: pane.pane_id, server_origin: this.options.origin, created_at: (this.options.now ?? Date.now)(), resolves: ask, machine_id: machine });
   }
   async stop() {
     this.stopped = true;

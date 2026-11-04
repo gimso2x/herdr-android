@@ -37,7 +37,8 @@ data class PaneSample(
     val title: String? = null,
 )
 
-enum class AlertKind { NEEDS_INPUT, FINISHED }
+/** [RESOLVED] is not an alert: it withdraws the [NEEDS_INPUT] alert of a question answered elsewhere. */
+enum class AlertKind { NEEDS_INPUT, FINISHED, RESOLVED }
 
 /** Existing alert presentation model; private [detail] is supplied by the authenticated event API. */
 data class Alert(

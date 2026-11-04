@@ -40,8 +40,9 @@ export async function firebaseSender(path: string): Promise<FirebaseSender> {
   return { send, close: () => deleteApp(app) };
 }
 
-export function fcmData(event: EventDetail) {
-  return { type: "herdr_event", event_id: event.event_id, kind: event.kind, pane_id: event.pane_id, server_origin: event.server_origin };
+export function fcmData(event: EventDetail): Record<string, string> {
+  const data = { type: "herdr_event", event_id: event.event_id, kind: event.kind, pane_id: event.pane_id, server_origin: event.server_origin };
+  return event.kind === "resolved" ? { ...data, resolves: event.resolves! } : data;
 }
 
 export function staleToken(error: unknown) {

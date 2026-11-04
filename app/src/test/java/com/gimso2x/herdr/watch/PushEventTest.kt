@@ -79,6 +79,24 @@ class PushEventTest {
         assertEquals("m".repeat(128), PushDetail.parse(body(",\"machine_id\":\"${"m".repeat(128)}\""), e, now)!!.machineId)
     }
 
+    @Test fun resolvedCarriesTheWithdrawnEventIdAndAlertsNeverDo() {
+        val ask = UUID.randomUUID().toString()
+        fun resolved(resolves: String = ask) = data() + mapOf("kind" to "resolved", "resolves" to resolves)
+        val event = PushEvent.decode(resolved(), now, now, origin)!!
+        assertEquals(AlertKind.RESOLVED, event.kind)
+        assertEquals(ask, event.resolves)
+        assertEquals("qa:p1", event.paneId)
+        assertNull(PushEvent.decode(resolved() - "resolves", now, now, origin))
+        for (bad in listOf("", "bad", "1-1-1-1-1", "$ask ", "${ask}0")) {
+            assertNull(bad, PushEvent.decode(resolved(bad), now, now, origin))
+        }
+        assertNull(PushEvent.decode(resolved() + ("machine_id" to "fixture-m1"), now, now, origin))
+        assertNull(PushEvent.decode(resolved(), now - PushEvent.TTL_MILLIS, now, origin))
+        assertNull(PushEvent.decode(data() + ("resolves" to ask), now, now, origin))
+        assertNull(PushEvent.decode(data() + mapOf("kind" to "finished", "resolves" to ask), now, now, origin))
+        assertNull(PushEvent.decode(data(), now, now, origin)!!.resolves)
+    }
+
     @Test fun fcmEnvelopeStillRejectsAMachineField() {
         assertNull(PushEvent.decode(data() + ("machine_id" to "fixture-m1"), now, now, origin))
     }

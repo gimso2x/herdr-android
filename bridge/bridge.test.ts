@@ -181,7 +181,7 @@ test("private detail fetch stays read-only and does not reach back to an older a
     f.detail({ prompt: { question: "\nProceed with this task?\nprivate second line" } });
     expect((await (await f.request(`/events/${input.event_id}`)).json()).detail).toBe("Proceed with this task?");
     await f.status("working"); f.advance(60000); await f.status("done");
-    const finish = f.delivered[1]!.event;
+    const finish = f.delivered.find(x => x.event.kind === "finished")!.event;
     f.detail({ turns: [{ role: "assistant", parts: [{ kind: "text", text: "old answer" }] }, { role: "assistant", parts: [{ kind: "text", text: "New answer.\nsecond line" }] }] });
     expect((await (await f.request(`/events/${finish.event_id}`)).json()).detail).toBe("New answer.");
     f.detail({ turns: [{ role: "assistant", parts: [{ kind: "text", text: "old answer" }] }, { role: "assistant", parts: [{ kind: "tool", text: "not an answer" }] }] });
@@ -211,6 +211,81 @@ describe("read-only live observer", () => {
     } finally { await f.close(); }
   });
 
+  test("an answered question withdraws its needs_input alert exactly once", async () => {
+    const f = await fixture();
+    try {
+      await f.register(); await f.status("blocked");
+      const ask = f.delivered[0]!.event;
+      await f.status("working"); await f.status("working");
+      expect(f.delivered.map(x => x.event.kind)).toEqual(["needs_input", "resolved"]);
+      const resolved = f.delivered[1]!.event;
+      expect(resolved).toMatchObject({ kind: "resolved", pane_id: "fixture-pane", server_origin: ORIGIN, resolves: ask.event_id });
+      expect(resolved.event_id).not.toBe(ask.event_id);
+    } finally { await f.close(); }
+  });
+
+  test("a long blocked turn that ends sends resolved before finished, for done and idle", async () => {
+    const f = await fixture();
+    try {
+      await f.register();
+      await f.status("blocked"); f.advance(60000); await f.status("done");
+      await f.status("blocked"); f.advance(60000); await f.status("idle");
+      expect(f.delivered.map(x => x.event.kind)).toEqual(["needs_input", "resolved", "finished", "needs_input", "resolved", "finished"]);
+      expect(f.delivered[1]!.event.resolves).toBe(f.delivered[0]!.event.event_id);
+      expect(f.delivered[4]!.event.resolves).toBe(f.delivered[3]!.event.event_id);
+    } finally { await f.close(); }
+  });
+
+  test("a pane that exits while blocked withdraws its question once", async () => {
+    const f = await fixture();
+    try {
+      await f.register(); await f.status("blocked");
+      await f.exit(); await f.exit();
+      expect(f.delivered.map(x => x.event.kind)).toEqual(["needs_input", "resolved"]);
+      expect(f.delivered[1]!.event.resolves).toBe(f.delivered[0]!.event.event_id);
+    } finally { await f.close(); }
+  });
+
+  test("no resolved without a seen blocked spell: plain turns, first seed, reconnect seed, repeated status", async () => {
+    const f = await fixture(undefined, pane("blocked"));
+    try {
+      await f.register();
+      await f.status("working"); f.advance(60000); await f.status("done");
+      await f.status("working"); f.advance(60000); await f.status("idle");
+      expect(f.delivered.map(x => x.event.kind)).toEqual(["finished"]);
+      await f.status("blocked"); await f.status("blocked"); await f.status("blocked");
+      expect(f.delivered.map(x => x.event.kind)).toEqual(["finished", "needs_input"]);
+      await f.reconnect(pane("blocked"));
+      await f.status("working"); await f.status("idle");
+      expect(f.delivered.map(x => x.event.kind)).toEqual(["finished", "needs_input"]);
+    } finally { await f.close(); }
+  });
+
+  test("a structure resync keeps a continuous question and never withdraws one by itself", async () => {
+    const f = await fixture();
+    try {
+      await f.register(); await f.status("blocked");
+      await f.resync(pane("blocked")); await f.status("working");
+      expect(f.delivered.map(x => x.event.kind)).toEqual(["needs_input", "resolved"]);
+      expect(f.delivered[1]!.event.resolves).toBe(f.delivered[0]!.event.event_id);
+      await f.status("blocked");
+      await f.resync(pane("idle")); await f.status("working");
+      expect(f.delivered.map(x => x.event.kind)).toEqual(["needs_input", "resolved", "needs_input"]);
+    } finally { await f.close(); }
+  });
+
+  test("resolved is sent but never cached, so its event detail is not found", async () => {
+    const f = await fixture();
+    try {
+      await f.register(); await f.status("blocked"); await f.status("working");
+      const [ask, resolved] = f.delivered.map(x => x.event);
+      expect(resolved!.kind).toBe("resolved");
+      expect((await f.request(`/events/${resolved!.event_id}`)).status).toBe(404);
+      expect((await f.request(`/events/${ask!.event_id}`)).status).toBe(200);
+      expect(JSON.parse(await (await f.request("/health")).text())).toMatchObject({ cached_events: 1, events: 2 });
+    } finally { await f.close(); }
+  });
+
   test("a transient unknown frame cannot erase the measured active turn", async () => {
     const f = await fixture();
     try {
@@ -230,8 +305,8 @@ describe("read-only live observer", () => {
       await f.status("blocked", { background_wait: true });
       expect(f.delivered.map(x => x.event.kind)).toEqual(["needs_input"]);
       await f.status("done");
-      expect(f.delivered.map(x => x.event.kind)).toEqual(["needs_input", "finished"]);
-      await f.status("done"); expect(f.delivered).toHaveLength(2);
+      expect(f.delivered.map(x => x.event.kind)).toEqual(["needs_input", "resolved", "finished"]);
+      await f.status("done"); expect(f.delivered).toHaveLength(3);
     } finally { await f.close(); }
   });
 
@@ -392,7 +467,57 @@ describe("remote machine panes", () => {
       expect(f.delivered).toHaveLength(1);
       expect(f.delivered[0]!.event).toMatchObject({ kind: "needs_input", pane_id: "remote-pane-a", machine_id: MACHINE, workspace: "Remote workspace", tab: "Remote tab", pane_title: "remote private title", server_origin: ORIGIN });
       await f.status("remote-pane-a", "idle"); await f.status("remote-pane-a", "blocked");
-      expect(f.delivered).toHaveLength(2);
+      expect(f.delivered.map(x => x.event.kind)).toEqual(["needs_input", "resolved", "needs_input"]);
+    } finally { await f.close(); }
+  });
+
+  test("an answered remote question withdraws its needs_input alert exactly once", async () => {
+    const f = await remoteFixture();
+    try {
+      await f.register();
+      await f.status("remote-pane-a", "blocked");
+      const ask = f.delivered[0]!.event;
+      await f.status("remote-pane-a", "working"); await f.status("remote-pane-a", "working");
+      expect(f.delivered.map(x => x.event.kind)).toEqual(["needs_input", "resolved"]);
+      const resolved = f.delivered[1]!.event;
+      expect(resolved).toMatchObject({ kind: "resolved", pane_id: "remote-pane-a", machine_id: MACHINE, server_origin: ORIGIN, resolves: ask.event_id });
+      expect(resolved.event_id).not.toBe(ask.event_id);
+    } finally { await f.close(); }
+  });
+
+  test("a long remote blocked turn sends resolved before finished, and an exit while blocked withdraws once", async () => {
+    const f = await remoteFixture();
+    try {
+      await f.register();
+      await f.status("remote-pane-a", "blocked"); f.advance(60000); await f.status("remote-pane-a", "done");
+      await f.status("remote-pane-a", "blocked"); f.advance(60000); await f.status("remote-pane-a", "idle");
+      expect(f.delivered.map(x => x.event.kind)).toEqual(["needs_input", "resolved", "finished", "needs_input", "resolved", "finished"]);
+      expect(f.delivered[1]!.event.resolves).toBe(f.delivered[0]!.event.event_id);
+      expect(f.delivered[4]!.event.resolves).toBe(f.delivered[3]!.event.event_id);
+      await f.status("remote-pane-a", "blocked");
+      await f.live({ type: "pane-exited", pane_id: "remote-pane-a" }); await f.live({ type: "pane-exited", pane_id: "remote-pane-a" });
+      expect(f.delivered.slice(6).map(x => x.event.kind)).toEqual(["needs_input", "resolved"]);
+      expect(f.delivered[7]!.event.resolves).toBe(f.delivered[6]!.event.event_id);
+      expect(f.delivered.every(x => x.event.machine_id === MACHINE)).toBe(true);
+    } finally { await f.close(); }
+  });
+
+  test("no remote resolved without a seen blocked spell: plain turns, first seed, reconnect seed, repeated status", async () => {
+    const f = await remoteFixture([machine([rpane("remote-pane-a", "blocked")])]);
+    try {
+      await f.register();
+      await f.status("remote-pane-a", "working"); await f.status("remote-pane-a", "idle");
+      await f.status("remote-pane-a", "working"); f.advance(60000); await f.status("remote-pane-a", "done");
+      expect(f.delivered.map(x => x.event.kind)).toEqual(["finished"]);
+      await f.status("remote-pane-a", "blocked"); await f.status("remote-pane-a", "blocked");
+      // A later machines frame keeps the live question, so it is still withdrawn.
+      await f.machines([machine([rpane("remote-pane-a", "blocked")])]);
+      await f.status("remote-pane-a", "working");
+      expect(f.delivered.map(x => x.event.kind)).toEqual(["finished", "needs_input", "resolved"]);
+      await f.status("remote-pane-a", "blocked");
+      await f.drop(); await f.retry();
+      await f.status("remote-pane-a", "working"); await f.status("remote-pane-a", "idle");
+      expect(f.delivered.map(x => x.event.kind)).toEqual(["finished", "needs_input", "resolved", "needs_input"]);
     } finally { await f.close(); }
   });
 
@@ -560,5 +685,13 @@ describe("remote machine panes", () => {
     expect(Object.keys(fcmData(local)).sort()).toEqual(keys);
     expect(Object.keys(fcmData(remote)).sort()).toEqual(keys);
     expect(fcmData(remote)).toEqual({ type: "herdr_event", event_id: remote.event_id, kind: "needs_input", pane_id: "p", server_origin: ORIGIN });
+    expect(Object.keys(fcmData({ ...remote, kind: "finished" })).sort()).toEqual(keys);
+  });
+
+  test("the FCM data of resolved adds only the withdrawn event id", async () => {
+    const ask = crypto.randomUUID();
+    const resolved: EventDetail = { event_id: crypto.randomUUID(), kind: "resolved", pane_id: "p", server_origin: ORIGIN, created_at: 1, resolves: ask, machine_id: MACHINE };
+    expect(Object.keys(fcmData(resolved)).sort()).toEqual(["event_id", "kind", "pane_id", "resolves", "server_origin", "type"]);
+    expect(fcmData(resolved)).toEqual({ type: "herdr_event", event_id: resolved.event_id, kind: "resolved", pane_id: "p", server_origin: ORIGIN, resolves: ask });
   });
 });

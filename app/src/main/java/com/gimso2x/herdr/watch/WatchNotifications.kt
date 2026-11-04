@@ -61,6 +61,15 @@ object WatchNotifications {
         }
     }
 
+    /** Cancels the alert of an answered question under whichever tag it has; idempotent, never posts or rings. */
+    fun withdraw(context: Context, resolves: String) {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        val active = manager.activeNotifications.map {
+            AlertWithdraw.Active(it.tag, it.id, it.notification.extras.getString(EXTRA_EVENT_ID))
+        }
+        for ((tag, id) in AlertWithdraw.targets(active, resolves)) manager.cancel(tag, id)
+    }
+
     fun clear(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         manager.cancel(LEGACY_NOTIFICATION)

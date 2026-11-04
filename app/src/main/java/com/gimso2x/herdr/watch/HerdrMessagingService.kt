@@ -31,6 +31,13 @@ object PushReceiver {
         synchronized(PushStore.lock) {
             if (!app.pushStore.enabled || !PushRegistration.eligible(app)) return false
             val event = PushEvent.decode(data, sentAt, System.currentTimeMillis(), HerdrConfig.baseUrl) ?: return false
+            if (event.kind == AlertKind.RESOLVED) {
+                // Withdrawal only: no alert, sound or detail fetch, also in the foreground. It stays out of the
+                // ledger: cancelling is idempotent, and its entry must not reject a later alert of the same pane.
+                WatchNotifications.withdraw(app, event.resolves!!)
+                WatchTestHooks.received(event, false, null)
+                return true
+            }
             val ledger = app.pushStore.ledger()
             if (!ledger.accept(event, System.currentTimeMillis())) return false
             app.pushStore.saveLedger(ledger) // persists before notifying: duplicate deliveries cannot ring again

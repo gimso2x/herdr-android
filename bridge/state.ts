@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 export const TTL_MS = 12 * 60 * 60 * 1000;
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export type Kind = "needs_input" | "finished";
+export type Kind = "needs_input" | "finished" | "resolved";
 export interface EventDetail {
   event_id: string;
   kind: Kind;
@@ -17,6 +17,8 @@ export interface EventDetail {
   detail?: string;
   // Only events for panes on a remote herdr machine carry this.
   machine_id?: string;
+  // Only "resolved" events carry this: the event_id of the needs_input alert they withdraw.
+  resolves?: string;
 }
 interface DiskState { devices: Record<string, string>; events: EventDetail[] }
 

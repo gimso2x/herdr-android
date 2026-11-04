@@ -3,27 +3,37 @@ package com.gimso2x.herdr.watch
 import java.util.UUID
 import org.json.JSONObject
 
-/** The public transport contains identifiers only; private text comes from the authenticated API. */
-data class PushEvent(val eventId: String, val kind: AlertKind, val paneId: String, val origin: String, val sentAt: Long) {
+/**
+ * The public transport contains identifiers only; private text comes from the authenticated API.
+ * [resolves] is set only for [AlertKind.RESOLVED]: the event id of the alert to withdraw.
+ */
+data class PushEvent(val eventId: String, val kind: AlertKind, val paneId: String, val origin: String, val sentAt: Long,
+                     val resolves: String? = null) {
     fun genericAlert() = Alert(paneId, kind, PaneSample(paneId, AgentStatus.UNKNOWN))
 
     companion object {
         const val TTL_MILLIS = 12 * 60 * 60 * 1000L
         private val fields = setOf("type", "event_id", "kind", "pane_id", "server_origin")
+        private val resolvedFields = fields + "resolves"
 
         fun decode(data: Map<String, String>, sentAt: Long, now: Long, origin: String): PushEvent? {
-            if (data.keys != fields || data["type"] != "herdr_event" || data["server_origin"] != origin) return null
-            val id = data["event_id"] ?: return null
-            if (!isUuid(id)) return null
-            val pane = data["pane_id"] ?: return null
-            if (pane.isBlank() || pane.length > 256 || pane.any { it.isISOControl() }) return null
             val kind = when (data["kind"]) {
                 "needs_input" -> AlertKind.NEEDS_INPUT
                 "finished" -> AlertKind.FINISHED
+                "resolved" -> AlertKind.RESOLVED
                 else -> return null
             }
+            // Only a withdrawal names the event it withdraws; an alert carrying that field is malformed.
+            val expected = if (kind == AlertKind.RESOLVED) resolvedFields else fields
+            if (data.keys != expected || data["type"] != "herdr_event" || data["server_origin"] != origin) return null
+            val id = data["event_id"] ?: return null
+            if (!isUuid(id)) return null
+            val resolves = data["resolves"]
+            if (resolves != null && !isUuid(resolves)) return null
+            val pane = data["pane_id"] ?: return null
+            if (pane.isBlank() || pane.length > 256 || pane.any { it.isISOControl() }) return null
             if (sentAt <= 0 || sentAt > now + 60_000 || now - sentAt >= TTL_MILLIS) return null
-            return PushEvent(id, kind, pane, origin, sentAt)
+            return PushEvent(id, kind, pane, origin, sentAt, resolves)
         }
 
         private fun isUuid(id: String): Boolean = try {
