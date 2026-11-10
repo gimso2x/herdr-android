@@ -90,8 +90,14 @@
     return m === 'GET' || m === 'HEAD';
   }
 
-  function block() {
+  // What was blocked, for a failing assertion: method and URL path only (no query, body or headers), at most 10.
+  window.__qaBlockedReqs = [];
+  function block(method, url) {
     window.__qaBlocked += 1;
+    if (window.__qaBlockedReqs.length >= 10) return;
+    var path = '?';
+    try { path = new URL(String(url), location.href).pathname; } catch (e) { /* keep '?' */ }
+    window.__qaBlockedReqs.push(String(method).toUpperCase() + ' ' + path.slice(0, 80));
   }
 
   if (typeof window.fetch === 'function') {
@@ -99,7 +105,7 @@
     window.fetch = function (input, init) {
       var method = (init && init.method) || (input && typeof input === 'object' && input.method) || 'GET';
       if (!methodAllowed(method)) {
-        block();
+        block(method, input && typeof input === 'object' && input.url ? input.url : input);
         return Promise.reject(new TypeError('qa-guard: ' + String(method).toUpperCase() + ' blocked'));
       }
       return originalFetch.apply(this, arguments);
@@ -108,9 +114,9 @@
 
   if (window.XMLHttpRequest) {
     var originalOpen = window.XMLHttpRequest.prototype.open;
-    window.XMLHttpRequest.prototype.open = function (method) {
+    window.XMLHttpRequest.prototype.open = function (method, url) {
       if (!methodAllowed(method)) {
-        block();
+        block(method, url);
         throw new Error('qa-guard: ' + String(method).toUpperCase() + ' blocked');
       }
       return originalOpen.apply(this, arguments);
@@ -119,8 +125,8 @@
 
   // sendBeacon is always a POST.
   if (navigator.sendBeacon) {
-    navigator.sendBeacon = function () {
-      block();
+    navigator.sendBeacon = function (url) {
+      block('POST', url);
       return false;
     };
   }
