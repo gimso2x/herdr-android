@@ -63,11 +63,13 @@ class L1LiveLoadTest {
         liveGuardOn()
         ActivityScenario.launch(MainActivity::class.java).use {
             // The workspace label is rendered from the /ws snapshot: seeing it proves the
-            // cookie-authenticated WebSocket works.
+            // cookie-authenticated WebSocket works. It is read from the DOM text, not innerText: with a
+            // pane already selected the label sits only in the closed (hidden) drawer, which innerText
+            // leaves out. Its visibility is checked below, once the drawer is open.
             val quoted = JSONObject.quote(label.lowercase())
             awaitLivePage(
                 60_000,
-                "document.body.innerText.toLowerCase().indexOf($quoted) >= 0",
+                "document.body.textContent.toLowerCase().indexOf($quoted) >= 0",
             ) {
                 "titleIsHerdr=${Qa.js(TITLE_IS_HERDR)} title=${Qa.jsString("document.title")} bodyChars=${Qa.js("document.body.innerText.length")} " +
                     "inText=${Qa.js("document.body.textContent.toLowerCase().indexOf($quoted) >= 0")}"
