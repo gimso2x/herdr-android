@@ -44,10 +44,24 @@ private fun awaitLivePage(timeoutMs: Long, extra: String = "true", detail: () ->
     }
 }
 
-/** The live page sent no non-GET request. Count and list come from one evaluation, so they cannot disagree. */
+/**
+ * Background writes the live Ovis web UI sends on its own while a page is merely open (2026-11-10, run 42769667598):
+ * telemetry and read markers (`/api/seen` records finishes as read in the server's seen.json). The guard still
+ * blocks them, so the live server is never written; they are only tolerated as attempts.
+ */
+private val PASSIVE_WRITES = setOf("POST /api/telemetry", "POST /api/seen")
+
+/**
+ * The live page attempted no write other than [PASSIVE_WRITES] (each one was blocked by the guard). Total and
+ * per-request counts come from one evaluation, so they cannot disagree.
+ */
 private fun assertNoBlockedRequest() {
     val snapshot = Qa.jsString("JSON.stringify({n: window.__qaBlocked, reqs: window.__qaBlockedReqs})")
-    assertEquals("blocked: $snapshot", 0L, JSONObject(snapshot ?: "{}").optLong("n", -1L))
+    val parsed = JSONObject(snapshot ?: "{}")
+    val reqs = parsed.optJSONObject("reqs") ?: JSONObject()
+    var passive = 0L
+    for (key in reqs.keys()) if (key in PASSIVE_WRITES) passive += reqs.getLong(key)
+    assertEquals("blocked: $snapshot", 0L, parsed.optLong("n", -1L) - passive)
 }
 
 /** True once an element of the workspace drawer holding [quotedLabel] (lower-case JSON string) is fully inside the viewport. */

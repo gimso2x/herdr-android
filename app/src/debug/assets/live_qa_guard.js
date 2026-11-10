@@ -90,14 +90,17 @@
     return m === 'GET' || m === 'HEAD';
   }
 
-  // What was blocked, for a failing assertion: method and URL path only (no query, body or headers), at most 10.
-  window.__qaBlockedReqs = [];
+  // What was blocked, counted per "METHOD path" (no query, body or headers). Past 20 distinct keys the rest go
+  // under "other", so the total always equals the sum of the counts.
+  window.__qaBlockedReqs = {};
   function block(method, url) {
     window.__qaBlocked += 1;
-    if (window.__qaBlockedReqs.length >= 10) return;
     var path = '?';
     try { path = new URL(String(url), location.href).pathname; } catch (e) { /* keep '?' */ }
-    window.__qaBlockedReqs.push(String(method).toUpperCase() + ' ' + path.slice(0, 80));
+    var key = String(method).toUpperCase() + ' ' + path.slice(0, 80);
+    var reqs = window.__qaBlockedReqs;
+    if (!(key in reqs) && Object.keys(reqs).length >= 20) key = 'other';
+    reqs[key] = (reqs[key] || 0) + 1;
   }
 
   if (typeof window.fetch === 'function') {
