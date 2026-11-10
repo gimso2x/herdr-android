@@ -44,6 +44,12 @@ private fun awaitLivePage(timeoutMs: Long, extra: String = "true", detail: () ->
     }
 }
 
+/** The live page sent no non-GET request. Count and list come from one evaluation, so they cannot disagree. */
+private fun assertNoBlockedRequest() {
+    val snapshot = Qa.jsString("JSON.stringify({n: window.__qaBlocked, reqs: window.__qaBlockedReqs})")
+    assertEquals("blocked: $snapshot", 0L, JSONObject(snapshot ?: "{}").optLong("n", -1L))
+}
+
 /** True once an element of the workspace drawer holding [quotedLabel] (lower-case JSON string) is fully inside the viewport. */
 private fun labelInViewport(quotedLabel: String): String =
     "(function(){var d=document.getElementById('workspace-drawer');if(!d||getComputedStyle(d).visibility!=='visible')return false;" +
@@ -74,11 +80,7 @@ class L1LiveLoadTest {
                 "titleIsHerdr=${Qa.js(TITLE_IS_HERDR)} title=${Qa.jsString("document.title")} bodyChars=${Qa.js("document.body.innerText.length")} " +
                     "inText=${Qa.js("document.body.textContent.toLowerCase().indexOf($quoted) >= 0")}"
             }
-            assertEquals(
-                "blocked=${Qa.jsString("JSON.stringify(window.__qaBlockedReqs)")}",
-                0L,
-                (Qa.js("window.__qaBlocked") as Number).toLong(),
-            )
+            assertNoBlockedRequest()
             // The label can come from the HTTP session load before the socket opens: wait (bounded)
             // for the guard to see the client's role frame instead of reading the counter once.
             Qa.until(20_000, "guard saw a role frame rewritten to observe", { "rewritten=${Qa.js("window.__qaRoleRewritten")}" }) {
@@ -132,11 +134,7 @@ class L1LiveLoadTest {
                         "' vw='+window.innerWidth+' expanded='+t.getAttribute('aria-expanded')+' vs='+document.visibilityState})()",
                 ),
             )
-            assertEquals(
-                "blocked=${Qa.jsString("JSON.stringify(window.__qaBlockedReqs)")}",
-                0L,
-                (Qa.js("window.__qaBlocked") as Number).toLong(),
-            )
+            assertNoBlockedRequest()
             // The DOM can be ahead of the display (and a banner may appear above the page): capture
             // into l1.png until the stored file itself differs in the drawer area (the left 85% of
             // the screen below the header/tab strip) from the closed-drawer baseline.
